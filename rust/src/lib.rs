@@ -25,6 +25,7 @@ pub mod embed;
 pub mod export;
 pub mod image;
 pub mod install;
+pub mod license;
 pub mod manifest;
 pub mod name_map;
 pub mod net;
