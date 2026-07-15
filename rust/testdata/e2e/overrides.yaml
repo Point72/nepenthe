@@ -1,0 +1,6 @@
+pins:
+  numpy: ">=2,<2.2"
+
+variants:
+  cpu:
+    constraints: ["pytorch * cpu*"]

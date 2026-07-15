@@ -1,0 +1,12 @@
+# Changes here will be overwritten by Copier
+_commit: 99606c7
+_src_path: https://github.com/python-project-templates/base.git
+add_docs: false
+add_extension: rust
+add_wiki: true
+email: OpenSource@Point72.com
+github: Point72
+project_description: Forget your environment sorrows
+project_name: nepenthe
+python_version_primary: '3.11'
+team: The nepenthe authors

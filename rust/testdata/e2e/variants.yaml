@@ -1,0 +1,5 @@
+variants:
+  cpu: {}
+  gpu:
+    dependencies: [cuda >=12]
+    constraints: ["pytorch * cuda*"]
