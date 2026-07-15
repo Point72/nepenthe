@@ -1,0 +1,20 @@
+[package]
+name = "nepenthe_py"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "nepenthe"
+path = "rust/python/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+fsspec_rs_bridge = "0.1.2"
+nepenthe-core = { path = "rust" }
+pyo3 = { version = "0.28.2", features = ["abi3", "extension-module", "multiple-pymethods"] }
+tokio = { version = "1.52.3", features = ["rt-multi-thread"] }
+
+[profile.release]
+panic = 'abort'
+lto = true

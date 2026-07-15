@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 898" width="760" height="898" role="img" aria-label="Editing the root dependency list over time (arrow down the left) produces a new fully-pinned environment at each step (right).">
+  <style>
+    /*THEME-START*/
+    .card{fill:#ffffff;stroke:#d0d7de;stroke-width:1.5}
+    .head{fill:#f6f8fa}
+    .divider{stroke:#d0d7de;stroke-width:1}
+    .ink{fill:#1f2328}
+    .muted{fill:#656d76}
+    .accent{fill:#0969da}
+    .accentLine{stroke:#0969da;stroke-width:2.5;fill:none}
+    .axisLine{stroke:#656d76;stroke-width:2;fill:none}
+    .pin{fill:#1a7f37}
+    .hl{fill:#0969da}
+    .tag{fill:#0969da}
+    .tagText{fill:#ffffff}
+    /*THEME-END*/
+    text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif}
+    .mono{font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace}
+    .t-title{font-size:14px;font-weight:600}
+    .t-row{font-size:13px}
+    .t-rowsm{font-size:12px}
+    .t-cap{font-size:12.5px}
+    .t-axis{font-size:13px;font-weight:600;letter-spacing:.06em}
+    .t-tag{font-size:12px;font-weight:700}
+  </style>
+  <defs>
+    <marker id="ev-arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="accent" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+    <marker id="ev-arrow-mut" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="muted" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <!-- Time axis down the left -->
+  <line class="axisLine" x1="44" y1="96" x2="44" y2="812" marker-end="url(#ev-arrow-mut)"/>
+  <text class="t-axis muted" text-anchor="middle" transform="rotate(-90 26 454)" x="26" y="454">edits over time</text>
+
+  <!-- Stage 1 -->
+  <g transform="translate(0 96)">
+    <rect class="card" x="92" y="0" width="200" height="176" rx="9"/>
+    <path class="head" d="M92 9 a9 9 0 0 1 9 -9 h182 a9 9 0 0 1 9 9 v23 h-200 z"/>
+    <line class="divider" x1="92" y1="32" x2="292" y2="32"/>
+    <text class="mono t-title ink" x="108" y="21">roots</text>
+    <text class="mono t-row ink" x="108" y="58">python 3.11.*</text>
+    <text class="mono t-row ink" x="108" y="85">numpy &gt;=2</text>
+    <text class="mono t-row ink" x="108" y="112">pandas</text>
+    <text class="mono t-row ink" x="108" y="139">pip</text>
+
+    <line class="accentLine" x1="356" y1="84" x2="418" y2="84" marker-end="url(#ev-arrow)"/>
+
+    <rect class="card" x="430" y="-6" width="276" height="188" rx="9"/>
+    <path class="head" d="M430 3 a9 9 0 0 1 9 -9 h258 a9 9 0 0 1 9 9 v23 h-276 z"/>
+    <line class="divider" x1="430" y1="26" x2="706" y2="26"/>
+    <text class="mono t-title ink" x="446" y="15">locked</text>
+    <rect class="tag" x="622" y="-2" width="64" height="22" rx="11"/>
+    <text class="t-tag tagText" x="654" y="13" text-anchor="middle">1.0.0</text>
+    <text class="mono t-rowsm" x="446" y="56"><tspan class="ink">python</tspan><tspan class="pin" x="540">==3.11.15</tspan></text>
+    <text class="mono t-rowsm" x="446" y="83"><tspan class="ink">numpy</tspan><tspan class="pin" x="540">==2.4.6</tspan></text>
+    <text class="mono t-rowsm" x="446" y="110"><tspan class="ink">pandas</tspan><tspan class="pin" x="540">==2.3.1</tspan></text>
+    <text class="mono t-rowsm muted" x="446" y="146">+ 309 more packages</text>
+  </g>
+
+  <!-- edit roots -->
+  <line class="accentLine" x1="192" y1="278" x2="192" y2="360" marker-end="url(#ev-arrow)"/>
+  <text class="t-cap muted" x="210" y="324">edit roots</text>
+
+  <!-- Stage 2 -->
+  <g transform="translate(0 366)">
+    <rect class="card" x="92" y="0" width="200" height="176" rx="9"/>
+    <path class="head" d="M92 9 a9 9 0 0 1 9 -9 h182 a9 9 0 0 1 9 9 v23 h-200 z"/>
+    <line class="divider" x1="92" y1="32" x2="292" y2="32"/>
+    <text class="mono t-title ink" x="108" y="21">roots</text>
+    <text class="mono t-row ink" x="108" y="58">python 3.11.*</text>
+    <text class="mono t-row ink" x="108" y="85">numpy &gt;=2</text>
+    <text class="mono t-row ink" x="108" y="112">pandas</text>
+    <text class="mono t-row ink" x="108" y="139">pip</text>
+    <text class="mono t-row hl" x="108" y="166">+ scipy</text>
+
+    <line class="accentLine" x1="356" y1="84" x2="418" y2="84" marker-end="url(#ev-arrow)"/>
+
+    <rect class="card" x="430" y="-6" width="276" height="188" rx="9"/>
+    <path class="head" d="M430 3 a9 9 0 0 1 9 -9 h258 a9 9 0 0 1 9 9 v23 h-276 z"/>
+    <line class="divider" x1="430" y1="26" x2="706" y2="26"/>
+    <text class="mono t-title ink" x="446" y="15">locked</text>
+    <rect class="tag" x="622" y="-2" width="64" height="22" rx="11"/>
+    <text class="t-tag tagText" x="654" y="13" text-anchor="middle">1.1.0</text>
+    <text class="mono t-rowsm" x="446" y="56"><tspan class="ink">python</tspan><tspan class="pin" x="540">==3.11.15</tspan></text>
+    <text class="mono t-rowsm" x="446" y="83"><tspan class="ink">numpy</tspan><tspan class="pin" x="540">==2.4.6</tspan></text>
+    <text class="mono t-rowsm" x="446" y="110"><tspan class="ink">scipy</tspan><tspan class="pin" x="540">==1.14.1</tspan></text>
+    <text class="mono t-rowsm muted" x="446" y="146">+ 340 more packages</text>
+  </g>
+
+  <!-- edit roots -->
+  <line class="accentLine" x1="192" y1="548" x2="192" y2="630" marker-end="url(#ev-arrow)"/>
+  <text class="t-cap muted" x="210" y="594">edit roots</text>
+
+  <!-- Stage 3 -->
+  <g transform="translate(0 636)">
+    <rect class="card" x="92" y="0" width="200" height="176" rx="9"/>
+    <path class="head" d="M92 9 a9 9 0 0 1 9 -9 h182 a9 9 0 0 1 9 9 v23 h-200 z"/>
+    <line class="divider" x1="92" y1="32" x2="292" y2="32"/>
+    <text class="mono t-title ink" x="108" y="21">roots</text>
+    <text class="mono t-row ink" x="108" y="58">python 3.11.*</text>
+    <text class="mono t-row hl" x="108" y="85">numpy &gt;=2.2</text>
+    <text class="mono t-row ink" x="108" y="112">pandas</text>
+    <text class="mono t-row ink" x="108" y="139">pip</text>
+    <text class="mono t-row ink" x="108" y="166">scipy</text>
+
+    <line class="accentLine" x1="356" y1="84" x2="418" y2="84" marker-end="url(#ev-arrow)"/>
+
+    <rect class="card" x="430" y="-6" width="276" height="188" rx="9"/>
+    <path class="head" d="M430 3 a9 9 0 0 1 9 -9 h258 a9 9 0 0 1 9 9 v23 h-276 z"/>
+    <line class="divider" x1="430" y1="26" x2="706" y2="26"/>
+    <text class="mono t-title ink" x="446" y="15">locked</text>
+    <rect class="tag" x="622" y="-2" width="64" height="22" rx="11"/>
+    <text class="t-tag tagText" x="654" y="13" text-anchor="middle">2.0.0</text>
+    <text class="mono t-rowsm" x="446" y="56"><tspan class="ink">python</tspan><tspan class="pin" x="540">==3.11.15</tspan></text>
+    <text class="mono t-rowsm" x="446" y="83"><tspan class="ink">numpy</tspan><tspan class="pin" x="540">==2.6.0</tspan></text>
+    <text class="mono t-rowsm" x="446" y="110"><tspan class="ink">scipy</tspan><tspan class="pin" x="540">==1.14.1</tspan></text>
+    <text class="mono t-rowsm muted" x="446" y="146">+ 351 more packages</text>
+  </g>
+
+  <text class="t-cap muted" x="380" y="862" text-anchor="middle">old releases are never re-solved — every version stays stable forever</text>
+</svg>

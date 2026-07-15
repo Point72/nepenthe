@@ -1,0 +1,21 @@
+project:
+  name: artifactory-demo
+  # Every bare channel name resolves against this internal Artifactory base
+  # instead of the public conda servers. This is the channel override.
+  channel-alias: https://artifactory.mycompany.net/artifactory/api/conda
+  channels: [conda-forge, my-custom-channel]
+  platforms: [linux-64]
+
+channels:
+  # Keep the public identity `conda-forge`, but fetch it from the internal
+  # `conda-forge-mirror` (which itself resolves against the alias above).
+  conda-forge:
+    mirror: conda-forge-mirror
+  # `my-custom-channel` needs no entry: a bare name resolves directly against
+  # the Artifactory alias.
+
+dependencies:
+  - numpy >=2
+
+environments:
+  app: []

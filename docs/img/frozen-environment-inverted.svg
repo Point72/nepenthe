@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 480" width="880" height="480" role="img" aria-label="A short, mostly-unpinned list of dependencies on the left is solved once into a fully-pinned environment on the right.">
+  <style>
+    /*THEME-START*/
+    .card{fill:#161b22;stroke:#30363d;stroke-width:1.5}
+    .head{fill:#21262d}
+    .divider{stroke:#30363d;stroke-width:1}
+    .ink{fill:#e6edf3}
+    .muted{fill:#8b949e}
+    .accent{fill:#58a6ff}
+    .accentLine{stroke:#58a6ff;stroke-width:2.5;fill:none}
+    .pin{fill:#3fb950}
+    .hl{fill:#58a6ff}
+    /*THEME-END*/
+    text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif}
+    .mono{font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace}
+    .t-title{font-size:15px;font-weight:600}
+    .t-row{font-size:14px}
+    .t-rowsm{font-size:12.5px}
+    .t-cap{font-size:13px}
+  </style>
+  <defs>
+    <marker id="fe-arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="accent" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <!-- Left: a short, mostly-unpinned dependency list -->
+  <rect class="card" x="48" y="96" width="300" height="288" rx="10"/>
+  <path class="head" d="M48 106 a10 10 0 0 1 10 -10 h280 a10 10 0 0 1 10 10 v30 h-300 z"/>
+  <line class="divider" x1="48" y1="136" x2="348" y2="136"/>
+  <text class="mono t-title ink" x="68" y="124">environment.yaml</text>
+  <text class="mono t-row muted" x="68" y="176">dependencies:</text>
+  <text class="mono t-row ink" x="68" y="210">  - python 3.11.*</text>
+  <text class="mono t-row ink" x="68" y="244">  - numpy &gt;=2</text>
+  <text class="mono t-row ink" x="68" y="278">  - pandas</text>
+  <text class="mono t-row ink" x="68" y="312">  - pip</text>
+  <text class="t-cap muted" x="198" y="424" text-anchor="middle">pin only what you must</text>
+
+  <!-- Solve once -->
+  <line class="accentLine" x1="366" y1="240" x2="512" y2="240" marker-end="url(#fe-arrow)"/>
+  <text class="t-cap accent" x="439" y="222" text-anchor="middle" font-weight="600">solve once</text>
+  <text class="t-cap muted" x="439" y="262" text-anchor="middle">freeze</text>
+
+  <!-- Right: the fully-pinned, solved environment -->
+  <rect class="card" x="532" y="64" width="300" height="336" rx="10"/>
+  <path class="head" d="M532 74 a10 10 0 0 1 10 -10 h280 a10 10 0 0 1 10 10 v30 h-300 z"/>
+  <line class="divider" x1="532" y1="104" x2="832" y2="104"/>
+  <text class="mono t-title ink" x="552" y="92">environment.lock</text>
+  <text class="mono t-rowsm" x="552" y="142"><tspan class="ink">python</tspan><tspan class="pin" x="648">==3.11.15</tspan></text>
+  <text class="mono t-rowsm" x="552" y="170"><tspan class="ink">numpy</tspan><tspan class="pin" x="648">==2.4.6</tspan></text>
+  <text class="mono t-rowsm" x="552" y="198"><tspan class="ink">pandas</tspan><tspan class="pin" x="648">==2.3.1</tspan></text>
+  <text class="mono t-rowsm" x="552" y="226"><tspan class="ink">pip</tspan><tspan class="pin" x="648">==25.1</tspan></text>
+  <text class="mono t-rowsm" x="552" y="254"><tspan class="ink">openssl</tspan><tspan class="pin" x="648">==3.5.0</tspan></text>
+  <text class="mono t-rowsm" x="552" y="282"><tspan class="ink">libblas</tspan><tspan class="pin" x="648">==3.11.0</tspan></text>
+  <text class="mono t-rowsm" x="552" y="310"><tspan class="ink">tzdata</tspan><tspan class="pin" x="648">==2025b</tspan></text>
+  <text class="mono t-rowsm muted" x="552" y="344">+ 305 more packages</text>
+  <text class="t-cap muted" x="682" y="424" text-anchor="middle">identical on every machine</text>
+</svg>
