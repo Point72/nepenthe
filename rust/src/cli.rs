@@ -86,6 +86,8 @@ enum Command {
     DiffVersions(DiffVersionsArgs),
     /// Compose several published environments into one lock.
     Compose(ComposeArgs),
+    /// Re-derive a lock's content address to verify its integrity.
+    Verify(VerifyArgs),
     /// Build a container image (SIF or OCI) from a published environment.
     #[command(subcommand)]
     Image(ImageCommand),
@@ -272,6 +274,34 @@ struct ManifestArgs {
     /// File to write the manifest to (defaults to stdout).
     #[arg(short, long)]
     output: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct VerifyArgs {
+    /// Verify a local lock file's content address (optionally against `--expect`).
+    #[arg(long, conflicts_with_all = ["env", "registry"])]
+    lock: Option<PathBuf>,
+    /// Environment name to resolve from a registry (with `--registry`).
+    #[arg(long, requires = "registry")]
+    env: Option<String>,
+    /// Registry root URL to resolve from (with `--env`).
+    #[arg(long, requires = "env")]
+    registry: Option<String>,
+    /// Target platform (defaults to the current platform).
+    #[arg(long)]
+    platform: Option<String>,
+    /// Python axis value, if the environment fans out over python.
+    #[arg(long)]
+    python: Option<String>,
+    /// Variant axis value (e.g. `cpu`/`gpu`), if any.
+    #[arg(long)]
+    variant: Option<String>,
+    /// Version label to resolve.
+    #[arg(long, default_value = "latest")]
+    label: String,
+    /// For `--lock`: the expected `sha256-<hex>` content address to check.
+    #[arg(long)]
+    expect: Option<String>,
 }
 
 #[derive(Args)]
@@ -694,6 +724,7 @@ async fn run_command(command: Command) -> CliResult {
         Command::List(args) => list(args),
         Command::DiffVersions(args) => diff_versions(args),
         Command::Compose(args) => compose(args).await,
+        Command::Verify(args) => verify(args),
         Command::Image(ImageCommand::Build(args)) => image_build(args).await,
         Command::Cache(CacheCommand::Clean { all }) => cache_clean(all),
     }
@@ -889,6 +920,72 @@ fn manifest(args: ManifestArgs) -> CliResult {
         }
         None => print!("{yaml}"),
     }
+    Ok(())
+}
+
+fn verify(args: VerifyArgs) -> CliResult {
+    use crate::registry::content_address;
+
+    // Local mode: re-derive a lock file's content address, optionally checking
+    // it against an expected `sha256-<hex>`.
+    if let Some(lock_path) = &args.lock {
+        let bytes = std::fs::read(lock_path)?;
+        let address = content_address(&bytes);
+        println!("lock {} → {address}", lock_path.display());
+        if crate::embed::extract_manifest(&bytes)?.is_some() {
+            println!("  embedded manifest band: present");
+        }
+        if let Some(expected) = &args.expect {
+            if expected == &address {
+                println!("  content address: OK (matches --expect)");
+            } else {
+                return Err(format!(
+                    "content address mismatch: expected {expected}, computed {address}"
+                )
+                .into());
+            }
+        }
+        return Ok(());
+    }
+
+    // Registry mode: resolve the release, then re-derive and check the content
+    // address of its lock (and manifest) against what the index records.
+    let (Some(env), Some(registry_url)) = (&args.env, &args.registry) else {
+        return Err("pass --lock <file>, or --env <name> --registry <url>".into());
+    };
+    let registry = Registry::new(SpecStore::new(), registry_url.clone());
+    let platform = args
+        .platform
+        .clone()
+        .unwrap_or_else(|| Platform::current().to_string());
+    let mut coords = Coordinates::new(env.clone(), platform);
+    if let Some(py) = &args.python {
+        coords = coords.with_python(py.clone());
+    }
+    if let Some(v) = &args.variant {
+        coords = coords.with_variant(v.clone());
+    }
+    let label = Label::parse(&args.label);
+
+    let release = registry.resolve(&coords, &label)?;
+    println!(
+        "release {} {} on {}",
+        release.environment, release.version, release.platform
+    );
+
+    // `pull` re-derives the lock's content address and rejects a mismatch, so a
+    // successful pull is a verified lock.
+    registry.pull(&coords, &label)?;
+    println!("  lock {}: OK", release.lock);
+
+    // A published lock relies on a manifest sidecar (the embedded band is
+    // stripped on publish); verify the sidecar's content address too.
+    if let Some(manifest_addr) = &release.manifest {
+        registry.pull_manifest(&coords, &label)?;
+        println!("  manifest {manifest_addr}: OK");
+    }
+
+    println!("verified");
     Ok(())
 }
 
