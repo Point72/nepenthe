@@ -1356,16 +1356,19 @@ fn bake_pins(deps: &mut [String], pins: &BTreeMap<String, String>) {
     }
 }
 
-/// Reject an `imports` entry that could escape the manifest tree: an absolute
-/// path or one containing a `..` component. Relative imports under the
+/// Reject an `imports` entry that could escape the manifest tree: a rooted or
+/// prefixed path, or one containing a `..` component. Relative imports under the
 /// manifest's own directory are allowed. Guards against path traversal if a
 /// manifest is ever accepted from untrusted input.
 fn validate_import_path(import: &str) -> Result<(), ManifestError> {
     let path = Path::new(import);
-    if path.is_absolute()
-        || path
-            .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir))
+    if path.has_root()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir | std::path::Component::Prefix(_)
+            )
+        })
     {
         return Err(ManifestError::UnsafeImport(import.to_string()));
     }
