@@ -33,6 +33,7 @@ pub mod producer;
 pub mod project;
 pub mod registry;
 pub mod run;
+pub mod selector;
 pub mod solve;
 
 /// Returns the `nepenthe-core` crate version (from `CARGO_PKG_VERSION`).

@@ -47,6 +47,7 @@ rattler_shell = "0.27"
 # Provides the authenticated `reqwest::Client` used for private conda channels.
 reqwest-middleware = { package = "astral-reqwest-middleware", version = "0.5" }
 tar = "0.4.44"
+minijinja = "2"
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros"] }
 
 [dev-dependencies]

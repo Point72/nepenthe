@@ -42,16 +42,17 @@ pub struct Manifest {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub channels: BTreeMap<String, Channel>,
     /// Base conda dependencies, injected into every environment. Each entry is
-    /// a conda match-spec string (e.g. `python >=3.11`).
+    /// a conda match-spec string (e.g. `python >=3.11`) or a conditional
+    /// `if`/`then`/`else` block (see [`DepEntry`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub dependencies: Vec<String>,
+    pub dependencies: Vec<DepEntry>,
     /// Base PyPI dependencies, injected into every environment.
     #[serde(
         default,
         rename = "pypi-dependencies",
         skip_serializing_if = "Vec::is_empty"
     )]
-    pub pypi_dependencies: Vec<String>,
+    pub pypi_dependencies: Vec<DepEntry>,
     /// Base activation hooks, applied to every environment. Materialized into
     /// the prefix's `etc/conda/activate.d/` on install so a full activation
     /// runs them.
@@ -167,20 +168,148 @@ pub struct Channel {
     pub priority: Option<i64>,
 }
 
+/// A dependency-list entry: either a plain match-spec string or a conditional
+/// block. Conditionals let a dependency list vary by build cell — see
+/// [`Conditional`] and [`crate::selector`].
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum DepEntry {
+    /// A plain conda/PyPI match-spec string (e.g. `numpy >=2`).
+    Plain(String),
+    /// A rattler-build-style `{ if, then, else }` conditional.
+    Conditional(Conditional),
+}
+
+/// A conditional dependency block (rattler-build's `if`/`then`/`else`). Its
+/// `then` entries are contributed when `if` evaluates true for the build cell,
+/// otherwise its `else` entries are. Each branch may be a single entry or a
+/// list, and may itself contain further conditionals — nesting an `if` under
+/// `else` expresses `elseif`. Conditions are minijinja expressions over the
+/// cell's `python` and `variant` (see [`crate::selector`]).
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Conditional {
+    /// The condition expression, e.g. `python != "3.13"`, `variant == "gpu"`,
+    /// or `cmp(python, ">=3.12")`.
+    #[serde(rename = "if")]
+    pub condition: String,
+    /// Entries contributed when the condition is true.
+    #[serde(
+        default,
+        deserialize_with = "one_or_many",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub then: Vec<DepEntry>,
+    /// Entries contributed when the condition is false.
+    #[serde(
+        rename = "else",
+        default,
+        deserialize_with = "one_or_many",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub otherwise: Vec<DepEntry>,
+}
+
+impl From<&str> for DepEntry {
+    fn from(spec: &str) -> Self {
+        DepEntry::Plain(spec.to_string())
+    }
+}
+
+impl From<String> for DepEntry {
+    fn from(spec: String) -> Self {
+        DepEntry::Plain(spec)
+    }
+}
+
+impl DepEntry {
+    /// Visit every plain match-spec string in this entry, recursing into
+    /// conditional branches (used by pin baking and lints, which apply to a
+    /// spec regardless of the condition guarding it).
+    fn for_each_spec(&self, visit: &mut impl FnMut(&str)) {
+        match self {
+            DepEntry::Plain(spec) => visit(spec),
+            DepEntry::Conditional(cond) => {
+                for entry in cond.then.iter().chain(&cond.otherwise) {
+                    entry.for_each_spec(visit);
+                }
+            }
+        }
+    }
+
+    /// Rewrite plain specs whose package is pinned, recursing into branches.
+    fn bake_pins(&mut self, pins: &BTreeMap<String, String>) {
+        match self {
+            DepEntry::Plain(spec) => {
+                if let Some(pin) = pins.get(spec_package_name(spec)) {
+                    *spec = format!("{} {}", spec_package_name(spec), pin);
+                }
+            }
+            DepEntry::Conditional(cond) => {
+                for entry in cond.then.iter_mut().chain(&mut cond.otherwise) {
+                    entry.bake_pins(pins);
+                }
+            }
+        }
+    }
+
+    /// Flatten this entry for a build `cell`, appending the concrete specs it
+    /// contributes to `out`. A conditional evaluates its `if` and recurses into
+    /// the chosen branch; a plain entry contributes itself.
+    fn flatten(
+        &self,
+        cell: &crate::selector::Cell,
+        out: &mut Vec<String>,
+    ) -> Result<(), ManifestError> {
+        match self {
+            DepEntry::Plain(spec) => out.push(spec.clone()),
+            DepEntry::Conditional(cond) => {
+                let branch = if crate::selector::evaluate(&cond.condition, cell)? {
+                    &cond.then
+                } else {
+                    &cond.otherwise
+                };
+                for entry in branch {
+                    entry.flatten(cell, out)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Deserialize a `then`/`else` branch that may be written as a single entry or
+/// a list; both normalize to a `Vec`.
+fn one_or_many<'de, D>(deserializer: D) -> Result<Vec<DepEntry>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        Many(Vec<DepEntry>),
+        One(DepEntry),
+    }
+    Ok(match OneOrMany::deserialize(deserializer)? {
+        OneOrMany::Many(entries) => entries,
+        OneOrMany::One(entry) => vec![entry],
+    })
+}
+
 /// A composable group of dependencies.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Feature {
     /// Conda dependencies contributed by this feature.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub dependencies: Vec<String>,
+    pub dependencies: Vec<DepEntry>,
     /// PyPI dependencies contributed by this feature.
     #[serde(
         default,
         rename = "pypi-dependencies",
         skip_serializing_if = "Vec::is_empty"
     )]
-    pub pypi_dependencies: Vec<String>,
+    pub pypi_dependencies: Vec<DepEntry>,
     /// Activation hooks contributed by this feature.
     #[serde(default, skip_serializing_if = "Activation::is_empty")]
     pub activation: Activation,
@@ -195,14 +324,14 @@ pub struct Variant {
     /// Conda dependencies pulled in when this variant is selected (e.g. `cuda`
     /// for `gpu`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub dependencies: Vec<String>,
+    pub dependencies: Vec<DepEntry>,
     /// PyPI dependencies pulled in when this variant is selected.
     #[serde(
         default,
         rename = "pypi-dependencies",
         skip_serializing_if = "Vec::is_empty"
     )]
-    pub pypi_dependencies: Vec<String>,
+    pub pypi_dependencies: Vec<DepEntry>,
     /// Match-spec constraints applied to the solve.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub constraints: Vec<String>,
@@ -583,6 +712,8 @@ pub enum ManifestError {
         /// The environment selected.
         environment: String,
     },
+    /// A conditional `if:` expression failed to parse or evaluate.
+    Condition(crate::selector::ConditionError),
 }
 
 impl fmt::Display for ManifestError {
@@ -642,6 +773,7 @@ impl fmt::Display for ManifestError {
                 f,
                 "environment '{environment}' has multiple Python versions and no default; specify one"
             ),
+            ManifestError::Condition(e) => write!(f, "{e}"),
         }
     }
 }
@@ -651,6 +783,7 @@ impl std::error::Error for ManifestError {
         match self {
             ManifestError::Io(e) => Some(e),
             ManifestError::Parse(e) => Some(e),
+            ManifestError::Condition(e) => Some(e),
             _ => None,
         }
     }
@@ -665,6 +798,12 @@ impl From<std::io::Error> for ManifestError {
 impl From<serde_yaml::Error> for ManifestError {
     fn from(e: serde_yaml::Error) -> Self {
         ManifestError::Parse(e)
+    }
+}
+
+impl From<crate::selector::ConditionError> for ManifestError {
+    fn from(e: crate::selector::ConditionError) -> Self {
+        ManifestError::Condition(e)
     }
 }
 
@@ -832,9 +971,10 @@ impl Manifest {
     /// Resolve one **cell** of an environment's build matrix, selecting a
     /// variant and Python version (falling back to declared defaults for any
     /// axis the `selector` omits). Composition is base ∪ features (incl. those
-    /// inherited via `extends`) ∪ the selected variant's deps, with the chosen
-    /// Python injected as `python <ver>.*`. The variant also contributes solver
-    /// constraints, and the effective platforms are resolved.
+    /// inherited via `extends`) ∪ the selected variant's deps, with each
+    /// dependency list's conditional (`if:`) entries evaluated for this cell,
+    /// and the chosen Python injected as `python <ver>.*`. The variant also
+    /// contributes solver constraints, and the effective platforms are resolved.
     pub fn resolve(
         &self,
         environment: &str,
@@ -843,10 +983,21 @@ impl Manifest {
         let mut chain = Vec::new();
         let feature_names = self.collect_features(environment, &mut chain)?;
 
-        let mut conda: BTreeSet<String> = self.dependencies.iter().cloned().collect();
-        let mut pypi: BTreeSet<String> = self.pypi_dependencies.iter().cloned().collect();
+        // Resolve the cell axes first: they drive conditional (`if:`) selection
+        // in every dependency list composed below.
+        let variant_name = self.choose_variant(environment, selector)?;
+        let python = self.choose_python(environment, selector)?;
+        let cell = crate::selector::Cell {
+            python: python.clone(),
+            variant: variant_name.clone(),
+        };
+
+        let mut conda: BTreeSet<String> = BTreeSet::new();
+        let mut pypi: BTreeSet<String> = BTreeSet::new();
         let mut constraints: BTreeSet<String> = BTreeSet::new();
         let mut activation = self.activation.clone();
+        flatten_into(&self.dependencies, &cell, &mut conda)?;
+        flatten_into(&self.pypi_dependencies, &cell, &mut pypi)?;
 
         for feature_name in &feature_names {
             let feature =
@@ -856,13 +1007,12 @@ impl Manifest {
                         environment: environment.to_string(),
                         feature: feature_name.clone(),
                     })?;
-            conda.extend(feature.dependencies.iter().cloned());
-            pypi.extend(feature.pypi_dependencies.iter().cloned());
+            flatten_into(&feature.dependencies, &cell, &mut conda)?;
+            flatten_into(&feature.pypi_dependencies, &cell, &mut pypi)?;
             activation.merge(&feature.activation);
         }
 
         let mut virtual_packages: BTreeMap<String, String> = BTreeMap::new();
-        let variant_name = self.choose_variant(environment, selector)?;
         if let Some(variant_name) = &variant_name {
             let variant =
                 self.variants
@@ -871,8 +1021,8 @@ impl Manifest {
                         environment: environment.to_string(),
                         variant: variant_name.clone(),
                     })?;
-            conda.extend(variant.dependencies.iter().cloned());
-            pypi.extend(variant.pypi_dependencies.iter().cloned());
+            flatten_into(&variant.dependencies, &cell, &mut conda)?;
+            flatten_into(&variant.pypi_dependencies, &cell, &mut pypi)?;
             constraints.extend(variant.constraints.iter().cloned());
             for (k, v) in &variant.virtual_packages {
                 virtual_packages.insert(k.clone(), v.clone());
@@ -880,7 +1030,6 @@ impl Manifest {
             activation.merge(&variant.activation);
         }
 
-        let python = self.choose_python(environment, selector)?;
         if let Some(py) = &python {
             conda.insert(format!("python {py}.*"));
         }
@@ -1264,22 +1413,26 @@ impl Manifest {
     pub fn lint(&self) -> Result<Vec<Lint>, ManifestError> {
         let mut lints = Vec::new();
 
-        for spec in &self.dependencies {
-            if is_hard_pin(spec) {
-                lints.push(Lint::HardPin {
-                    location: Location::Base,
-                    spec: spec.clone(),
-                });
-            }
-        }
-        for (feature_name, feature) in &self.features {
-            for spec in &feature.dependencies {
+        for entry in &self.dependencies {
+            entry.for_each_spec(&mut |spec| {
                 if is_hard_pin(spec) {
                     lints.push(Lint::HardPin {
-                        location: Location::Feature(feature_name.clone()),
-                        spec: spec.clone(),
+                        location: Location::Base,
+                        spec: spec.to_string(),
                     });
                 }
+            });
+        }
+        for (feature_name, feature) in &self.features {
+            for entry in &feature.dependencies {
+                entry.for_each_spec(&mut |spec| {
+                    if is_hard_pin(spec) {
+                        lints.push(Lint::HardPin {
+                            location: Location::Feature(feature_name.clone()),
+                            spec: spec.to_string(),
+                        });
+                    }
+                });
             }
         }
 
@@ -1299,20 +1452,23 @@ impl Manifest {
             }
         }
 
-        let base_names: BTreeSet<&str> = self
-            .dependencies
-            .iter()
-            .map(|s| spec_package_name(s))
-            .collect();
+        let mut base_names: BTreeSet<String> = BTreeSet::new();
+        for entry in &self.dependencies {
+            entry.for_each_spec(&mut |spec| {
+                base_names.insert(spec_package_name(spec).to_string());
+            });
+        }
         for (feature_name, feature) in &self.features {
-            for spec in &feature.dependencies {
-                let name = spec_package_name(spec);
-                if base_names.contains(name) {
-                    lints.push(Lint::BaseFeatureCollision {
-                        feature: feature_name.clone(),
-                        package: name.to_string(),
-                    });
-                }
+            for entry in &feature.dependencies {
+                entry.for_each_spec(&mut |spec| {
+                    let name = spec_package_name(spec);
+                    if base_names.contains(name) {
+                        lints.push(Lint::BaseFeatureCollision {
+                            feature: feature_name.clone(),
+                            package: name.to_string(),
+                        });
+                    }
+                });
             }
         }
 
@@ -1327,12 +1483,28 @@ fn is_hard_pin(spec: &str) -> bool {
 
 /// Append `extra` to `target`, preserving order and skipping values already
 /// present.
-fn extend_dedup(target: &mut Vec<String>, extra: Vec<String>) {
+fn extend_dedup<T: PartialEq>(target: &mut Vec<T>, extra: Vec<T>) {
     for value in extra {
         if !target.contains(&value) {
             target.push(value);
         }
     }
+}
+
+/// Flatten a dependency list for a build `cell`, inserting each resolved
+/// match-spec into `out` (deduping and sorting via the set). Conditional
+/// entries are evaluated and their selected branch spliced in.
+fn flatten_into(
+    entries: &[DepEntry],
+    cell: &crate::selector::Cell,
+    out: &mut BTreeSet<String>,
+) -> Result<(), ManifestError> {
+    let mut buf = Vec::new();
+    for entry in entries {
+        entry.flatten(cell, &mut buf)?;
+    }
+    out.extend(buf);
+    Ok(())
 }
 
 /// Extract the package name from a conda match-spec string by taking the text
@@ -1346,13 +1518,11 @@ fn spec_package_name(spec: &str) -> &str {
 }
 
 /// Rewrite each spec in `deps` whose package name is pinned, replacing it with
-/// `<name> <pin>` so the pinned version wins. Specs for unpinned packages are
-/// left untouched.
-fn bake_pins(deps: &mut [String], pins: &BTreeMap<String, String>) {
+/// `<name> <pin>` so the pinned version wins. Conditional entries are pinned in
+/// place (in both branches); specs for unpinned packages are left untouched.
+fn bake_pins(deps: &mut [DepEntry], pins: &BTreeMap<String, String>) {
     for dep in deps.iter_mut() {
-        if let Some(pin) = pins.get(spec_package_name(dep)) {
-            *dep = format!("{} {}", spec_package_name(dep), pin);
-        }
+        dep.bake_pins(pins);
     }
 }
 
@@ -1766,7 +1936,10 @@ features:
         // Project name preserved (fragment has none).
         assert_eq!(base.project.name, "root");
         // Lists concatenate but dedup.
-        assert_eq!(base.dependencies, ["python", "numpy", "scipy"]);
+        assert_eq!(
+            base.dependencies,
+            ["python", "numpy", "scipy"].map(DepEntry::from)
+        );
         // Feature maps union.
         assert!(base.features.contains_key("a"));
         assert!(base.features.contains_key("b"));
@@ -2013,7 +2186,9 @@ exclude:
             ["pytorch >=2.8,<2.9 cuda129*"]
         );
         // gpu keeps its pre-existing cuda dependency.
-        assert!(m.variants["gpu"].dependencies.contains(&"cuda".to_string()));
+        assert!(m.variants["gpu"]
+            .dependencies
+            .contains(&DepEntry::from("cuda")));
     }
 
     #[test]
@@ -2031,10 +2206,128 @@ environments:
         let ov = Overrides::from_yaml_str(OVERRIDES).expect("overrides");
         m.apply(&ov);
         let net = &m.features["net"].dependencies;
-        assert!(net.contains(&"grpcio >=1.73,<1.74".to_string()));
-        assert!(net.contains(&"protobuf >=6.31.1,<6.31.2".to_string()));
+        assert!(net.contains(&DepEntry::from("grpcio >=1.73,<1.74")));
+        assert!(net.contains(&DepEntry::from("protobuf >=6.31.1,<6.31.2")));
         // Unpinned package is untouched.
-        assert!(net.contains(&"requests".to_string()));
+        assert!(net.contains(&DepEntry::from("requests")));
+    }
+
+    #[test]
+    fn resolve_conditional_drops_dependency_for_python() {
+        let yaml = r#"
+project:
+  name: p
+  python: ["3.12", "3.13"]
+dependencies: [numpy]
+features:
+  ml:
+    dependencies:
+      - scikit-learn
+      - if: python != "3.13"
+        then: [tensorflow, tensorboard]
+environments:
+  app: [ml]
+"#;
+        let m = Manifest::from_yaml_str(yaml).expect("parses");
+        let keep = m
+            .resolve("app", &Selector::default().with_python("3.12"))
+            .expect("resolves 3.12");
+        assert!(keep.dependencies.contains(&"tensorflow".to_string()));
+        assert!(keep.dependencies.contains(&"tensorboard".to_string()));
+        let drop = m
+            .resolve("app", &Selector::default().with_python("3.13"))
+            .expect("resolves 3.13");
+        assert!(!drop.dependencies.iter().any(|d| d == "tensorflow"));
+        assert!(!drop.dependencies.iter().any(|d| d == "tensorboard"));
+        assert!(drop.dependencies.contains(&"numpy".to_string()));
+        assert!(drop.dependencies.contains(&"scikit-learn".to_string()));
+        assert!(drop.dependencies.contains(&"python 3.13.*".to_string()));
+    }
+
+    #[test]
+    fn resolve_conditional_then_else_by_variant() {
+        let yaml = r#"
+project:
+  name: p
+variants:
+  cpu: {}
+  gpu: {}
+features:
+  accel:
+    dependencies:
+      - if: variant == "gpu"
+        then: cuda-nvcc
+        else: nomkl
+environments:
+  app:
+    features: [accel]
+    variants: [cpu, gpu]
+    default-variant: cpu
+"#;
+        let m = Manifest::from_yaml_str(yaml).expect("parses");
+        let gpu = m.resolve("app", &Selector::variant("gpu")).expect("gpu");
+        assert!(gpu.dependencies.contains(&"cuda-nvcc".to_string()));
+        assert!(!gpu.dependencies.iter().any(|d| d == "nomkl"));
+        let cpu = m.resolve("app", &Selector::variant("cpu")).expect("cpu");
+        assert!(cpu.dependencies.contains(&"nomkl".to_string()));
+        assert!(!cpu.dependencies.iter().any(|d| d == "cuda-nvcc"));
+    }
+
+    #[test]
+    fn resolve_conditional_nested_elseif_and_cmp() {
+        let yaml = r#"
+project:
+  name: p
+  python: ["3.11", "3.12", "3.13"]
+features:
+  pins:
+    dependencies:
+      - if: python == "3.11"
+        then: legacy-pkg
+        else:
+          - if: cmp(python, ">=3.13")
+            then: new-pkg
+            else: mid-pkg
+environments:
+  app: [pins]
+"#;
+        let m = Manifest::from_yaml_str(yaml).expect("parses");
+        let plain = |r: ResolvedEnvironment| -> Vec<String> {
+            r.dependencies
+                .into_iter()
+                .filter(|d| !d.starts_with("python "))
+                .collect()
+        };
+        let at = |py: &str| {
+            plain(
+                m.resolve("app", &Selector::default().with_python(py))
+                    .expect("resolves"),
+            )
+        };
+        assert_eq!(at("3.11"), ["legacy-pkg"]);
+        assert_eq!(at("3.12"), ["mid-pkg"]);
+        assert_eq!(at("3.13"), ["new-pkg"]);
+    }
+
+    #[test]
+    fn resolve_conditional_invalid_expression_errors() {
+        let yaml = r#"
+project:
+  name: p
+  python: ["3.12"]
+features:
+  x:
+    dependencies:
+      - if: python ===
+        then: foo
+environments:
+  app: [x]
+"#;
+        let m = Manifest::from_yaml_str(yaml).expect("parses");
+        let err = m
+            .resolve("app", &Selector::default().with_python("3.12"))
+            .unwrap_err();
+        assert!(matches!(err, ManifestError::Condition(_)));
     }
 
     #[test]

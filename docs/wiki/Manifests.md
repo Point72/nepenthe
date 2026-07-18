@@ -72,6 +72,55 @@ strings** (`numpy >=2`); PyPI deps are routed explicitly via
 > `pypi-dependencies`, but driving a full solve over an environment that has
 > them fails fast rather than silently producing a conda-only lock.
 
+### Conditional dependencies (`if` / `then` / `else`)
+
+Any `dependencies` / `pypi-dependencies` list — at the manifest base, on a
+feature, or on a variant — may contain rattler-build-style conditional entries
+alongside plain match-specs. Each is evaluated **per build cell** and its `then`
+(or `else`) entries are spliced into the list:
+
+```yaml
+features:
+  core:
+    dependencies:
+      - numpy
+      - if: python != "3.13"          # drop a dep on a python with no build yet
+        then: [tensorflow, tensorboard]
+      - if: variant == "gpu"
+        then: cuda-nvcc               # scalar or list
+        else: nomkl
+```
+
+`then` and `else` may each be a single entry or a list, and either may itself
+contain another `if` — nesting under `else` expresses `elseif`:
+
+```yaml
+      - if: python == "3.11"
+        then: legacy-pkg
+        else:
+          - if: cmp(python, ">=3.13")
+            then: new-pkg
+            else: mid-pkg
+```
+
+The `if` is a [minijinja](https://docs.rs/minijinja) expression over the cell's
+two axes:
+
+| Variable  | Value                                                             |
+| --------- | ----------------------------------------------------------------- |
+| `python`  | The selected python (e.g. `"3.13"`), or `""` if the env has none. |
+| `variant` | The selected variant (e.g. `"gpu"`), or `""` if the env has none. |
+
+Supported operators are minijinja's: `==`, `!=`, `<`, `>`, `and`, `or`, `not`,
+`in`, parentheses. Because bare comparisons are lexical (`"3.9" > "3.13"`), use
+the `cmp(version, spec)` helper for version-aware checks against a conda version
+spec — `cmp(python, ">=3.12")`, `cmp(python, "3.11.*")`. A malformed expression
+fails the solve rather than silently dropping a dependency.
+
+> `platform` is intentionally **not** available: a resolved cell's dependency
+> set is solved for every one of its platforms, so there is no single platform
+> value at resolve time. Use per-environment `platforms` to scope by platform.
+
 ### `features`
 
 Named, composable dependency groups. An environment lists the features it wants;
@@ -141,7 +190,8 @@ needs, so other environments don't require its credentials. See
 ## Composition & the build matrix
 
 Resolving a `(variant, python)` cell unions: base deps → selected features
-(incl. inherited) → selected variant → the chosen python (`python <ver>.*`).
+(incl. inherited) → selected variant, evaluating each list's conditional
+(`if:`) entries for the cell, then adds the chosen python (`python <ver>.*`).
 Conda and PyPI deps stay separate.
 
 ```rust
