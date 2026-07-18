@@ -16,7 +16,7 @@ Two config sources share one schema.
 
 ```toml
 [tool.nepenthe.run]
-environment = "ccrt"
+environment = "myenv"
 registry = "file:///srv/nepenthe"
 version = "1.3.0"                  # label: latest | exact | range
 python = "3.11"                    # + optional platform / variant
@@ -33,7 +33,7 @@ nepenthe run                       # reads ./pyproject.toml
 
 ```python
 # /// nepenthe
-# environment = "ccrt"
+# environment = "myenv"
 # registry = "file:///srv/nepenthe"
 # python = "3.11"
 # with = ["polars>=1"]             # shorthand for overlay.conda

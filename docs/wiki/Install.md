@@ -104,6 +104,15 @@ nepenthe create app \
 
 No conda, mamba, or micromamba is required on the machine.
 
+Already have a lock file (e.g. one published as a plain artifact)? Install it
+directly — no registry, no solve. The lock's own package URLs drive the fetch:
+
+```bash
+nepenthe create --lock app.lock --prefix ./envs/app
+# the environment name is taken from the lock (pass it explicitly if the
+# lock declares more than one); --platform defaults to the current platform.
+```
+
 If the environment declares [`activation`](Manifests#activation) hooks, `create`
 also materializes them into `etc/conda/activate.d/` (recovered from the manifest
 the lock was solved from), so a subsequent [`activate`](#activate) runs them.

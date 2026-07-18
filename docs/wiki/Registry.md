@@ -18,7 +18,7 @@ Coordinates { environment, platform, python?, variant? }
 ```
 
 Each `(environment, platform, python, variant)` has its **own** semver sequence
-— `ccrt` can be on `2.0.0` while `ccml` is on `0.5.0`.
+— `myenv` can be on `2.0.0` while `myenv2` is on `0.5.0`.
 
 A **label** selects a version within a coordinate:
 

@@ -110,7 +110,7 @@ impl SolveRequest {
             .cloned()
             .unwrap_or_else(|| "linux-64".to_string());
         // Base (project) channels first, then any channels the environment adds
-        // (e.g. a private channel only `ccrt-private` needs), deduped.
+        // (e.g. a private channel only `myenv-private` needs), deduped.
         let mut all_channels = channels;
         for channel in &resolved.channels {
             if !all_channels.contains(channel) {
@@ -603,7 +603,7 @@ mod tests {
     fn from_resolved_appends_environment_channels() {
         let resolved = ResolvedEnvironment {
             name: "private".to_string(),
-            dependencies: vec!["ccrt-config".to_string()],
+            dependencies: vec!["myenv-config".to_string()],
             platforms: vec!["linux-64".to_string()],
             channels: vec!["private-channel".to_string(), "conda-forge".to_string()],
             ..Default::default()
@@ -860,9 +860,9 @@ mod tests {
         // bare internal names, plus a mirror redirecting public conda-forge.
         let yaml = r#"
 project:
-  name: ccrt
+  name: myenv
   channel-alias: https://artifacts.example.com/api/conda
-  channels: [dept-ccrt-conda-published-local, conda-forge]
+  channels: [dept-myenv-conda-published-local, conda-forge]
 channels:
   conda-forge:
     mirror: remote-repos-conda-forge
@@ -894,7 +894,7 @@ environments:
         assert_eq!(
             urls,
             [
-                "https://artifacts.example.com/api/conda/dept-ccrt-conda-published-local",
+                "https://artifacts.example.com/api/conda/dept-myenv-conda-published-local",
                 "https://artifacts.example.com/api/conda/remote-repos-conda-forge",
             ]
         );

@@ -504,7 +504,7 @@ name = "demo"
 dependencies = ["numpy>=2", "requests"]
 
 [tool.nepenthe]
-environment = "ccrt"
+environment = "myenv"
 registry = "file:///srv/nepenthe"
 version = "1.3.0"
 python = "3.11"
@@ -515,7 +515,7 @@ python = "3.11"
         std::fs::write(&path, text).unwrap();
 
         let project = read(&path).unwrap();
-        assert_eq!(project.nepenthe.environment, "ccrt");
+        assert_eq!(project.nepenthe.environment, "myenv");
         assert_eq!(project.nepenthe.python.as_deref(), Some("3.11"));
         assert_eq!(project.nepenthe.prefix(), PathBuf::from(".venv"));
         // a relative prefix resolves beside the pyproject.toml, not the CWD
