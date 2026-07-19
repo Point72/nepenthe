@@ -46,7 +46,7 @@ struct NpbCli {
 enum Command {
     /// Solve a manifest into lock(s) and optionally publish them.
     Build(BuildArgs),
-    /// Create an environment from a published lock (no conda required).
+    /// Create an environment from a local lock file or a published registry release (no conda required).
     Create(CreateArgs),
     /// Download a lock from a registry without installing it.
     Pull(PullArgs),
@@ -177,9 +177,28 @@ struct BuildArgs {
 
 #[derive(Args)]
 struct CreateArgs {
-    #[command(flatten)]
-    coords: Coords,
-    /// Version label to resolve (`latest`, `latest-but-one`, an exact version, or a semver range).
+    /// Environment name. With `--registry` it selects the release to resolve;
+    /// with `--lock` it defaults to the lock's only environment (required when
+    /// the lock declares several).
+    env: Option<String>,
+    /// Install directly from a local lock file — no registry, no solve. The
+    /// lock's own package URLs drive the fetch.
+    #[arg(long, conflicts_with = "registry")]
+    lock: Option<PathBuf>,
+    /// Registry root URL to resolve and pull the lock from.
+    #[arg(long, conflicts_with = "lock")]
+    registry: Option<String>,
+    /// Target platform (defaults to the current platform).
+    #[arg(long)]
+    platform: Option<String>,
+    /// Python axis value (e.g. `3.11`), when resolving from a registry.
+    #[arg(long)]
+    python: Option<String>,
+    /// Variant axis value (e.g. `cpu`/`gpu`), when resolving from a registry.
+    #[arg(long)]
+    variant: Option<String>,
+    /// Version label to resolve (`latest`, `latest-but-one`, an exact version, or a semver range),
+    /// when resolving from a registry.
     #[arg(long, default_value = "latest")]
     label: String,
     /// Directory to install the environment into.
@@ -716,10 +735,52 @@ async fn build(args: BuildArgs) -> CliResult {
 }
 
 async fn create(args: CreateArgs) -> CliResult {
-    let registry = args.coords.build_registry();
-    let coords = args.coords.coordinates();
-    let label = Label::parse(&args.label);
-    let summary = install::create(&registry, &coords, &label, &args.prefix).await?;
+    let platform = args
+        .platform
+        .clone()
+        .unwrap_or_else(|| Platform::current().to_string());
+
+    let summary = if let Some(lock_path) = &args.lock {
+        // No registry, no solve: install exactly the packages the lock pins,
+        // fetched from their own channel URLs.
+        let bytes = std::fs::read(lock_path)?;
+        let lock = install::parse_lock(&bytes)?;
+        let environment = match &args.env {
+            Some(env) => env.clone(),
+            None => install::sole_environment(&lock)?,
+        };
+        let summary = install::install_lock(&lock, &environment, &platform, &args.prefix).await?;
+        install::write_hooks_from_lock(
+            &bytes,
+            &environment,
+            &platform,
+            args.python.as_deref(),
+            args.variant.as_deref(),
+            None,
+            &args.prefix,
+        )?;
+        summary
+    } else {
+        let registry_url = args
+            .registry
+            .clone()
+            .ok_or("pass --lock <file>, or --registry <url> with an environment name")?;
+        let env = args
+            .env
+            .clone()
+            .ok_or("pass an environment name to resolve from --registry")?;
+        let registry = Registry::new(SpecStore::new(), registry_url);
+        let mut coords = Coordinates::new(env, platform.clone());
+        if let Some(py) = &args.python {
+            coords = coords.with_python(py.clone());
+        }
+        if let Some(v) = &args.variant {
+            coords = coords.with_variant(v.clone());
+        }
+        let label = Label::parse(&args.label);
+        install::create(&registry, &coords, &label, &args.prefix).await?
+    };
+
     println!(
         "created {} ({}) at {} — {} packages",
         summary.environment,

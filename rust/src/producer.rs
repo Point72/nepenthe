@@ -495,7 +495,7 @@ mod tests {
     #[test]
     fn unsafe_stems_are_rejected() {
         assert!(is_safe_stem("app"));
-        assert!(is_safe_stem("ccrt-win-py3.11"));
+        assert!(is_safe_stem("myenv-win-py3.11"));
         assert!(!is_safe_stem(""));
         assert!(!is_safe_stem(".."));
         assert!(!is_safe_stem("../etc/passwd"));

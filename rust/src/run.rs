@@ -14,7 +14,7 @@
 //!
 //!   ```text
 //!   # /// nepenthe
-//!   # environment = "ccrt"
+//!   # environment = "myenv"
 //!   # registry = "file:///srv/nepenthe"
 //!   # with = ["polars>=1"]
 //!   # ///
@@ -767,7 +767,7 @@ mod tests {
 name = "demo"
 
 [tool.nepenthe.run]
-environment = "ccrt"
+environment = "myenv"
 registry = "file:///srv/nepenthe"
 version = "1.3.0"
 python = "3.11"
@@ -781,7 +781,7 @@ command = "python -m mytool"
         std::fs::write(&path, text).unwrap();
 
         let config = RunConfig::from_pyproject(&path).unwrap();
-        assert_eq!(config.environment, "ccrt");
+        assert_eq!(config.environment, "myenv");
         assert_eq!(config.python.as_deref(), Some("3.11"));
         assert_eq!(config.overlay_conda, vec!["polars>=1"]);
         assert_eq!(config.command, vec!["python", "-m", "mytool"]);
@@ -793,14 +793,14 @@ command = "python -m mytool"
 
     #[test]
     fn parses_inline_block_with_with_shorthand() {
-        let script = "# /// nepenthe\n# environment = \"ccrt\"\n# registry = \"file:///srv/nepenthe\"\n# with = [\"rich\", \"polars>=1\"]\n# ///\nimport rich\n";
+        let script = "# /// nepenthe\n# environment = \"myenv\"\n# registry = \"file:///srv/nepenthe\"\n# with = [\"rich\", \"polars>=1\"]\n# ///\nimport rich\n";
         let dir = std::env::temp_dir().join(format!("nepenthe-run-inline-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("script.py");
         std::fs::write(&path, script).unwrap();
 
         let config = RunConfig::from_inline_script(&path).unwrap().unwrap();
-        assert_eq!(config.environment, "ccrt");
+        assert_eq!(config.environment, "myenv");
         // `with` is folded into the conda overlay.
         assert_eq!(config.overlay_conda, vec!["rich", "polars>=1"]);
         // The default command runs the script with python.
@@ -844,7 +844,7 @@ command = "python -m mytool"
     fn parses_pip_overlay_separately_from_conda() {
         let text = r#"
 [tool.nepenthe.run]
-environment = "ccrt"
+environment = "myenv"
 registry = "file:///srv/nepenthe"
 overlay = { conda = ["polars>=1"], pip = ["rich", "httpx>=0.27"] }
 "#;

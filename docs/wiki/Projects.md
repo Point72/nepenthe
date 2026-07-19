@@ -31,7 +31,7 @@ dependencies = [
 ]
 
 [tool.nepenthe]
-environment = "ccrt"                 # required: which published environment
+environment = "myenv"                 # required: which published environment
 registry = "file:///srv/nepenthe"    # required: where it is published
 version = "1.3.0"                     # optional: label (default "latest")
 platform = "linux-64"                # optional: defaults to the current platform
@@ -48,7 +48,7 @@ prefix = ".venv"                     # optional: install location (default ".ven
 ```bash
 nepenthe sync                          # reads ./pyproject.toml
 nepenthe sync --project path/to/pyproject.toml
-# synced ccrt (linux-64) at .venv — 312 packages
+# synced myenv (linux-64) at .venv — 312 packages
 ```
 
 `sync` resolves the version label against the registry, pulls the lock, and

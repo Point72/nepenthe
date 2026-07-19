@@ -2010,7 +2010,7 @@ environments:
     features: [algo]
     variants: [cpu, gpu]
     default-variant: cpu
-  ccml:
+  altenv:
     features: [algo]
     variants: [gpu]
   mwaa:
@@ -2023,8 +2023,8 @@ environments:
         let m = Manifest::from_yaml_str(MATRIX).expect("parses");
         // hfalgo: {cpu, gpu} x {3.11, 3.12, 3.13} = 6 cells.
         assert_eq!(m.targets("hfalgo").expect("targets").len(), 6);
-        // ccml: single variant x 3 pythons = 3 cells.
-        assert_eq!(m.targets("ccml").expect("targets").len(), 3);
+        // altenv: single variant x 3 pythons = 3 cells.
+        assert_eq!(m.targets("altenv").expect("targets").len(), 3);
         // mwaa: no variant axis x its own single python = 1 cell.
         assert_eq!(m.targets("mwaa").expect("targets").len(), 1);
     }
@@ -2170,7 +2170,7 @@ variants:
   gpu:
     constraints: ["pytorch >=2.8,<2.9 cuda129*"]
 exclude:
-  "3.13": [ccml]
+  "3.13": [altenv]
 "#;
 
     #[test]
@@ -2333,15 +2333,15 @@ environments:
     #[test]
     fn apply_records_virtual_packages_and_exclude_prunes_matrix() {
         let mut m = Manifest::from_yaml_str(MATRIX).expect("parses");
-        // Before: ccml has 3 python cells.
-        assert_eq!(m.targets("ccml").expect("targets").len(), 3);
+        // Before: altenv has 3 python cells.
+        assert_eq!(m.targets("altenv").expect("targets").len(), 3);
         let ov = Overrides::from_yaml_str(OVERRIDES).expect("overrides");
         m.apply(&ov);
         // Global virtual-packages recorded.
         assert_eq!(m.virtual_packages["cuda"], "12.9");
         assert_eq!(m.virtual_packages["archspec"], "skylake_avx512");
-        // exclude prunes the (ccml, 3.13) cell → 2 remain.
-        let cells = m.targets("ccml").expect("targets");
+        // exclude prunes the (altenv, 3.13) cell → 2 remain.
+        let cells = m.targets("altenv").expect("targets");
         assert_eq!(cells.len(), 2);
         assert!(cells.iter().all(|s| s.python.as_deref() != Some("3.13")));
     }
@@ -2349,12 +2349,12 @@ environments:
     #[test]
     fn include_allowlist_keeps_only_named_environments() {
         let mut m = Manifest::from_yaml_str(MATRIX).expect("parses");
-        // ccml builds for all 3 pythons by default.
-        assert_eq!(m.targets("ccml").expect("targets").len(), 3);
-        // An include allowlist for 3.13 naming only hfalgo drops ccml@3.13...
+        // altenv builds for all 3 pythons by default.
+        assert_eq!(m.targets("altenv").expect("targets").len(), 3);
+        // An include allowlist for 3.13 naming only hfalgo drops altenv@3.13...
         let ov = Overrides::from_yaml_str("include:\n  \"3.13\": [hfalgo]\n").expect("overrides");
         m.apply(&ov);
-        let cells = m.targets("ccml").expect("targets");
+        let cells = m.targets("altenv").expect("targets");
         assert_eq!(cells.len(), 2);
         assert!(cells.iter().all(|s| s.python.as_deref() != Some("3.13")));
         // ...but hfalgo, on the allowlist, keeps its 3.13 cells.
@@ -2369,12 +2369,12 @@ environments:
     fn exclude_wins_over_include_on_overlap() {
         let mut m = Manifest::from_yaml_str(MATRIX).expect("parses");
         let ov = Overrides::from_yaml_str(
-            "include:\n  \"3.13\": [ccml]\nexclude:\n  \"3.13\": [ccml]\n",
+            "include:\n  \"3.13\": [altenv]\nexclude:\n  \"3.13\": [altenv]\n",
         )
         .expect("overrides");
         m.apply(&ov);
-        // ccml is both included and excluded at 3.13 → excluded.
-        let cells = m.targets("ccml").expect("targets");
+        // altenv is both included and excluded at 3.13 → excluded.
+        let cells = m.targets("altenv").expect("targets");
         assert!(cells.iter().all(|s| s.python.as_deref() != Some("3.13")));
     }
 

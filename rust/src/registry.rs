@@ -531,8 +531,8 @@ mod tests {
     fn index_yaml_round_trips() {
         let index = Index {
             releases: vec![
-                release("ccrt", "linux-64", Some("3.11"), "1.2.0", "sha256-aaa"),
-                release("ccml", "osx-arm64", None, "0.4.1", "sha256-bbb"),
+                release("myenv", "linux-64", Some("3.11"), "1.2.0", "sha256-aaa"),
+                release("altenv", "osx-arm64", None, "0.4.1", "sha256-bbb"),
             ],
         };
         let yaml = index.to_yaml().expect("serialises");
@@ -554,12 +554,12 @@ mod tests {
     fn resolve_latest_and_latest_but_one() {
         let index = Index {
             releases: vec![
-                release("ccrt", "linux-64", Some("3.11"), "1.0.0", "sha256-a"),
-                release("ccrt", "linux-64", Some("3.11"), "1.2.0", "sha256-c"),
-                release("ccrt", "linux-64", Some("3.11"), "1.1.0", "sha256-b"),
+                release("myenv", "linux-64", Some("3.11"), "1.0.0", "sha256-a"),
+                release("myenv", "linux-64", Some("3.11"), "1.2.0", "sha256-c"),
+                release("myenv", "linux-64", Some("3.11"), "1.1.0", "sha256-b"),
             ],
         };
-        let coords = Coordinates::new("ccrt", "linux-64").with_python("3.11");
+        let coords = Coordinates::new("myenv", "linux-64").with_python("3.11");
         assert_eq!(
             index.resolve(&coords, &Label::Latest).unwrap().version,
             "1.2.0"
@@ -577,12 +577,12 @@ mod tests {
     fn resolve_exact_and_range_pick_the_right_version() {
         let index = Index {
             releases: vec![
-                release("ccrt", "linux-64", None, "1.0.0", "sha256-a"),
-                release("ccrt", "linux-64", None, "1.1.0", "sha256-b"),
-                release("ccrt", "linux-64", None, "2.0.0", "sha256-c"),
+                release("myenv", "linux-64", None, "1.0.0", "sha256-a"),
+                release("myenv", "linux-64", None, "1.1.0", "sha256-b"),
+                release("myenv", "linux-64", None, "2.0.0", "sha256-c"),
             ],
         };
-        let coords = Coordinates::new("ccrt", "linux-64");
+        let coords = Coordinates::new("myenv", "linux-64");
         assert_eq!(
             index
                 .resolve(&coords, &Label::Exact("1.0.0".into()))
@@ -626,13 +626,13 @@ mod tests {
     fn resolve_filters_by_coordinates() {
         let index = Index {
             releases: vec![
-                release("ccrt", "linux-64", Some("3.11"), "1.0.0", "sha256-a"),
-                release("ccrt", "linux-64", Some("3.12"), "9.9.9", "sha256-z"),
-                release("ccrt", "osx-arm64", Some("3.11"), "5.0.0", "sha256-y"),
+                release("myenv", "linux-64", Some("3.11"), "1.0.0", "sha256-a"),
+                release("myenv", "linux-64", Some("3.12"), "9.9.9", "sha256-z"),
+                release("myenv", "osx-arm64", Some("3.11"), "5.0.0", "sha256-y"),
             ],
         };
         // only the 3.11 / linux-64 sequence is considered
-        let coords = Coordinates::new("ccrt", "linux-64").with_python("3.11");
+        let coords = Coordinates::new("myenv", "linux-64").with_python("3.11");
         assert_eq!(
             index.resolve(&coords, &Label::Latest).unwrap().version,
             "1.0.0"
@@ -652,9 +652,9 @@ mod tests {
     #[test]
     fn invalid_version_in_index_is_reported() {
         let index = Index {
-            releases: vec![release("ccrt", "linux-64", None, "not-semver", "sha256-a")],
+            releases: vec![release("myenv", "linux-64", None, "not-semver", "sha256-a")],
         };
-        let coords = Coordinates::new("ccrt", "linux-64");
+        let coords = Coordinates::new("myenv", "linux-64");
         assert!(matches!(
             index.resolve(&coords, &Label::Latest),
             Err(RegistryError::InvalidVersion(_))
@@ -672,45 +672,45 @@ mod tests {
         let root_url = format!("file://{}", root.to_str().expect("utf-8 temp path"));
 
         let registry = Registry::new(SpecStore::new(), &root_url);
-        let ccrt = Coordinates::new("ccrt", "linux-64").with_python("3.11");
-        let ccml = Coordinates::new("ccml", "linux-64").with_python("3.11");
+        let myenv = Coordinates::new("myenv", "linux-64").with_python("3.11");
+        let altenv = Coordinates::new("altenv", "linux-64").with_python("3.11");
 
         // two independently-versioned environments
         registry
-            .publish(&ccrt, "1.0.0", b"ccrt lock 1.0.0")
+            .publish(&myenv, "1.0.0", b"myenv lock 1.0.0")
             .unwrap();
         registry
-            .publish(&ccrt, "1.1.0", b"ccrt lock 1.1.0")
+            .publish(&myenv, "1.1.0", b"myenv lock 1.1.0")
             .unwrap();
         registry
-            .publish(&ccrt, "1.2.0", b"ccrt lock 1.2.0")
+            .publish(&myenv, "1.2.0", b"myenv lock 1.2.0")
             .unwrap();
         registry
-            .publish(&ccml, "0.4.0", b"ccml lock 0.4.0")
+            .publish(&altenv, "0.4.0", b"altenv lock 0.4.0")
             .unwrap();
         registry
-            .publish(&ccml, "0.5.0", b"ccml lock 0.5.0")
+            .publish(&altenv, "0.5.0", b"altenv lock 0.5.0")
             .unwrap();
 
         // label resolution, no filename encoding
         assert_eq!(
-            registry.resolve(&ccrt, &Label::Latest).unwrap().version,
+            registry.resolve(&myenv, &Label::Latest).unwrap().version,
             "1.2.0"
         );
         assert_eq!(
             registry
-                .resolve(&ccrt, &Label::LatestButOne)
+                .resolve(&myenv, &Label::LatestButOne)
                 .unwrap()
                 .version,
             "1.1.0"
         );
         assert_eq!(
-            registry.resolve(&ccml, &Label::Latest).unwrap().version,
+            registry.resolve(&altenv, &Label::Latest).unwrap().version,
             "0.5.0"
         );
         assert_eq!(
             registry
-                .resolve(&ccrt, &Label::parse(">=1.0,<1.2"))
+                .resolve(&myenv, &Label::parse(">=1.0,<1.2"))
                 .unwrap()
                 .version,
             "1.1.0"
@@ -718,21 +718,23 @@ mod tests {
 
         // pull returns the exact bytes that were published
         assert_eq!(
-            registry.pull(&ccrt, &Label::Latest).unwrap(),
-            b"ccrt lock 1.2.0"
+            registry.pull(&myenv, &Label::Latest).unwrap(),
+            b"myenv lock 1.2.0"
         );
         assert_eq!(
-            registry.pull(&ccrt, &Label::Exact("1.0.0".into())).unwrap(),
-            b"ccrt lock 1.0.0"
+            registry
+                .pull(&myenv, &Label::Exact("1.0.0".into()))
+                .unwrap(),
+            b"myenv lock 1.0.0"
         );
 
         // republishing identical content is idempotent
         registry
-            .publish(&ccrt, "1.2.0", b"ccrt lock 1.2.0")
+            .publish(&myenv, "1.2.0", b"myenv lock 1.2.0")
             .unwrap();
         // republishing a version with different content is rejected (immutable)
         assert!(matches!(
-            registry.publish(&ccrt, "1.2.0", b"tampered"),
+            registry.publish(&myenv, "1.2.0", b"tampered"),
             Err(RegistryError::VersionExists(_))
         ));
 

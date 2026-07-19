@@ -257,10 +257,10 @@ virtual-packages:
   archspec: skylake_avx512
 
 exclude:
-  "3.13": [ccml]                # denylist: don't build ccml on python 3.13
+  "3.13": [altenv]                # denylist: don't build altenv on python 3.13
 
 include:
-  "3.13": [ccrt, gmor]          # allowlist: on 3.13 build ONLY these (shorthand
+  "3.13": [myenv, otherenv]          # allowlist: on 3.13 build ONLY these (shorthand
                                 # when fewer are built than excluded)
 ```
 

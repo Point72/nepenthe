@@ -438,6 +438,54 @@ pub async fn create(
     Ok(summary)
 }
 
+/// The name of the lock's only environment, or an error if it declares none or
+/// several. Lets a file-based install infer the environment when the caller
+/// omits it — a per-cell lock written by `build` has exactly one.
+pub fn sole_environment(lock: &LockFile) -> Result<String, InstallError> {
+    let names: Vec<String> = lock
+        .environments()
+        .map(|(name, _)| name.to_string())
+        .collect();
+    match names.as_slice() {
+        [only] => Ok(only.clone()),
+        [] => Err(InstallError::Lock("lock declares no environments".into())),
+        _ => Err(InstallError::Lock(format!(
+            "lock declares multiple environments ({}); pass one explicitly",
+            names.join(", ")
+        ))),
+    }
+}
+
+/// Materialize activation hooks recovered from a lock's embedded manifest band
+/// (best-effort, no registry). Composing the hooks does not solve packages. When
+/// the lock carries no embedded manifest, or it declares no hooks, nothing is
+/// written. `version` is optional: a bare lock file (unlike a registry release)
+/// carries no version label.
+pub fn write_hooks_from_lock(
+    lock_bytes: &[u8],
+    environment: &str,
+    platform: &str,
+    python: Option<&str>,
+    variant: Option<&str>,
+    version: Option<&str>,
+    prefix: &Path,
+) -> Result<(), InstallError> {
+    let Some(yaml) = crate::embed::extract_manifest(lock_bytes).ok().flatten() else {
+        return Ok(());
+    };
+    let Ok(manifest) = crate::manifest::Manifest::from_yaml_str(&yaml) else {
+        return Ok(());
+    };
+    let selector = crate::manifest::Selector {
+        variant: variant.map(String::from),
+        python: python.map(String::from),
+    };
+    if let Ok(resolved) = manifest.resolve(environment, &selector) {
+        write_activation_hooks(prefix, environment, version, platform, &resolved.activation)?;
+    }
+    Ok(())
+}
+
 /// Materialize an environment's [activation hooks](crate::manifest::Activation)
 /// into `prefix`'s `etc/conda/activate.d/` so a full activation runs them.
 ///
@@ -933,6 +981,43 @@ mod tests {
         // an unknown platform/environment is reported, not panicked
         assert!(lock_packages(&lock, "app", "win-64").is_err());
         assert!(lock_packages(&lock, "nope", "linux-64").is_err());
+    }
+
+    #[test]
+    fn sole_environment_infers_the_single_environment() {
+        use crate::export::to_lockfile_string;
+        use crate::solve::{ChannelPriorityMode, SolveOutcome};
+        use rattler_conda_types::package::DistArchiveIdentifier;
+        use rattler_conda_types::{PackageName, PackageRecord, RepoDataRecord, VersionWithSource};
+        use url::Url;
+
+        let mut pr = PackageRecord::new(
+            PackageName::from_str("numpy").unwrap(),
+            VersionWithSource::from_str("2.1.0").unwrap(),
+            "py311h0".to_string(),
+        );
+        pr.subdir = "linux-64".to_string();
+        let record = RepoDataRecord {
+            package_record: pr,
+            identifier: "numpy-2.1.0-py311h0.conda"
+                .parse::<DistArchiveIdentifier>()
+                .unwrap(),
+            url: Url::parse("https://example.com/conda-forge/linux-64/numpy-2.1.0-py311h0.conda")
+                .unwrap(),
+            channel: Some("https://example.com/conda-forge".to_string()),
+        };
+        let outcome = SolveOutcome {
+            records: vec![record],
+            channels: vec!["https://example.com/conda-forge".to_string()],
+            platform: "linux-64".to_string(),
+            virtual_packages: vec![],
+            channel_priority: ChannelPriorityMode::Disabled,
+            exclude_newer: None,
+        };
+        // A per-cell lock (one environment) is inferred without an explicit name.
+        let lock_yaml = to_lockfile_string(&outcome, "myenv").expect("render lock");
+        let lock = parse_lock(lock_yaml.as_bytes()).expect("parse lock");
+        assert_eq!(sole_environment(&lock).unwrap(), "myenv");
     }
 
     #[test]
