@@ -992,9 +992,9 @@ dependencies = [
 
 [[package]]
 name = "fsspec_rs"
-version = "0.1.3"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e55d12778cc576d0fe7412097cffd98eb1ac1b69ac636722477d00e80fd6193d"
+checksum = "8dfb8bedc451a1be1623343d05828fb412b9c381edae11920267cfa787a547a0"
 dependencies = [
  "bytes",
  "object_store",
@@ -1004,9 +1004,9 @@ dependencies = [
 
 [[package]]
 name = "fsspec_rs_bridge"
-version = "0.1.3"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd2ac0fc669fd527c310f2c1dd9a129f61c56f3b04c1850c976465761ca04fbc"
+checksum = "9e57e9e0749981f8c40859afbeb2a7566bd1a40631c3f2f59239ec4cb4789619"
 dependencies = [
  "fsspec_rs",
  "pyo3",
@@ -1923,6 +1923,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "memo-map"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38d1115007560874e373613744c6fba374c17688327a71c1476d1a5954cc857b"
+
+[[package]]
+name = "minijinja"
+version = "2.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb3d648e68cea56d9858d535ee28f9538404e2dd8cb08ed0bd05dca379477f39"
+dependencies = [
+ "memo-map",
+ "serde",
+]
+
+[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1954,6 +1970,7 @@ dependencies = [
  "fsspec_rs",
  "hex",
  "jiff",
+ "minijinja",
  "rattler",
  "rattler_cache",
  "rattler_conda_types",
