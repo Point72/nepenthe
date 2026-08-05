@@ -345,6 +345,27 @@ pub async fn install_lock(
     install_records(records, environment, platform, prefix).await
 }
 
+/// Render `error` and its `source` chain as `outer: cause: root cause`.
+///
+/// `thiserror` renders only the outermost message, so flattening a rattler
+/// error into a `String` otherwise drops why it failed: `failed to fetch
+/// <package>` keeps the package name but discards the HTTP status, timeout or
+/// checksum mismatch underneath it.
+fn error_chain(error: &dyn std::error::Error) -> String {
+    let mut message = error.to_string();
+    let mut next = error.source();
+    while let Some(cause) = next {
+        let text = cause.to_string();
+        // `#[error(transparent)]` repeats its source verbatim; don't say it twice.
+        if !message.ends_with(&text) {
+            message.push_str(": ");
+            message.push_str(&text);
+        }
+        next = cause.source();
+    }
+    message
+}
+
 /// Install pre-extracted `records` for one `environment`/`platform` into
 /// `prefix` with rattler's installer (no conda required). Records whose `url`
 /// is a `file://` path are read locally (no network) — this is what lets a
@@ -371,7 +392,7 @@ pub async fn install_records(
         .with_target_platform(target)
         .install(prefix, records)
         .await
-        .map_err(|e| InstallError::Install(e.to_string()))?;
+        .map_err(|e| InstallError::Install(error_chain(&e)))?;
 
     Ok(InstallSummary {
         prefix: prefix.to_path_buf(),
@@ -784,6 +805,71 @@ mod tests {
         assert_eq!(
             pkg("numpy", "2.1.0", "py311h0").to_string(),
             "numpy=2.1.0=py311h0"
+        );
+    }
+
+    #[test]
+    fn error_chain_appends_every_cause() {
+        #[derive(Debug)]
+        struct Layer(&'static str, Option<Box<Layer>>);
+
+        impl fmt::Display for Layer {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+
+        impl std::error::Error for Layer {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                self.1.as_deref().map(|e| e as &dyn std::error::Error)
+            }
+        }
+
+        let root = Layer("connection refused", None);
+        let middle = Layer("error sending request", Some(Box::new(root)));
+        let outer = Layer(
+            "failed to fetch libsolv-0.7.39-h9463b59_0.conda",
+            Some(Box::new(middle)),
+        );
+        assert_eq!(
+            error_chain(&outer),
+            "failed to fetch libsolv-0.7.39-h9463b59_0.conda: error sending request: connection refused"
+        );
+    }
+
+    #[test]
+    fn error_chain_does_not_repeat_a_transparent_wrapper() {
+        #[derive(Debug)]
+        struct Inner;
+        #[derive(Debug)]
+        struct Transparent(Inner);
+
+        impl fmt::Display for Inner {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "the real problem")
+            }
+        }
+        impl std::error::Error for Inner {}
+
+        impl fmt::Display for Transparent {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+        impl std::error::Error for Transparent {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+
+        assert_eq!(error_chain(&Transparent(Inner)), "the real problem");
+    }
+
+    #[test]
+    fn error_chain_of_a_lone_error_is_its_message() {
+        assert_eq!(
+            error_chain(&InstallError::Lock("no such environment".into())),
+            "invalid lock: no such environment"
         );
     }
 
