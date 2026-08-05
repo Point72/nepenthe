@@ -1,4 +1,8 @@
+<<<<<<< before updating
 import nepenthe
+=======
+from nepenthe import *
+>>>>>>> after updating
 
 
 def test_public_api_surface():
