@@ -10,15 +10,10 @@ path = "rust/python/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-<<<<<<< before updating
 fsspec_rs_bridge = "0.1.2"
 nepenthe-core = { path = "rust" }
 pyo3 = { version = "0.29.0", features = ["abi3", "extension-module", "multiple-pymethods"] }
 tokio = { version = "1.52.3", features = ["rt-multi-thread"] }
-=======
-nepenthe = { path = "./rust", version = "*" }
-pyo3 = { version = "0.29.0", features = ["abi3", "extension-module", "multiple-pymethods"] }
->>>>>>> after updating
 
 [profile.release]
 panic = 'abort'
