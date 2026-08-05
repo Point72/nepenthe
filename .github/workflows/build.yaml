@@ -47,6 +47,14 @@ jobs:
       - name: Setup Rust
         uses: actions-ext/rust/setup@2db8e3e4c56beb7320c7d730bd2c2d6a6447bf6b
 
+      # `make develop` compiles these from source otherwise, ~10 minutes a run.
+      # These are the prebuilt binaries; the Makefile skips its own install when
+      # they are already on PATH.
+      - name: Install cargo tools
+        uses: taiki-e/install-action@cb33e69fad06166ca28a42b2575e4dadabf62ee8  # v2.85.8
+        with:
+          tool: cargo-nextest,cargo-llvm-cov
+
       - name: Install dependencies
         run: make develop
 
@@ -57,8 +65,12 @@ jobs:
         run: make checks
         if: matrix.os == 'ubuntu-latest'
 
+      # On Linux `make dist-rs` rebuilds this same release profile, and
+      # cibuildwheel then rebuilds the tree again from scratch in the manylinux
+      # container, so building here is a third compile and a third copy on disk.
       - name: Build
         run: make build
+        if: matrix.os != 'ubuntu-latest'
 
       - name: Test
         run: make coverage
