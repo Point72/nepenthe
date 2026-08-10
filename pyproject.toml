@@ -99,7 +99,13 @@ rustup target add aarch64-unknown-linux-gnu
 rustup target add x86_64-unknown-linux-gnu
 rustup show
 """
-environment = {PATH="$HOME/.cargo/bin:$PATH", CARGO_TERM_COLOR="always"}
+# cibuildwheel mounts the host filesystem at /host, so pointing the cargo target
+# dir there keeps the wheel build's compiled artifacts outside the container.
+# They then survive the container and can be restored on the next run — the
+# in-container build is the one compile in CI that Swatinem/rust-cache cannot
+# reach, and it was taking 17 of the job's 34 minutes. /tmp rather than a
+# runner-specific path so a local `make dist-py-wheel` benefits too.
+environment = {PATH="$HOME/.cargo/bin:$PATH", CARGO_TERM_COLOR="always", CARGO_TARGET_DIR="/host/tmp/cibw-cargo-target"}
 skip = "*i686* *musllinux*"
 manylinux-x86_64-image = "manylinux_2_28"
 

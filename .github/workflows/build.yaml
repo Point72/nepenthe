@@ -106,6 +106,20 @@ jobs:
         shell: bash
         if: matrix.os == 'ubuntu-latest'
 
+      # The wheel is compiled inside the manylinux container, which cannot see
+      # the Swatinem/rust-cache the host steps use. pyproject points the
+      # container's CARGO_TARGET_DIR at /host/tmp/cibw-cargo-target, so this
+      # caches that build across runs. Keyed on the lockfile; a toolchain bump
+      # still forces a full rebuild, which cargo handles by itself.
+      - name: Cache cibuildwheel Rust build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: /tmp/cibw-cargo-target
+          key: cibw-cargo-target-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust/Cargo.lock') }}
+          restore-keys: |
+            cibw-cargo-target-${{ runner.os }}-
+        if: matrix.os == 'ubuntu-latest'
+
       - name: Build distributions (Linux)
         run: |
           rm -rf dist
@@ -114,6 +128,10 @@ jobs:
           rm -rf rust/target
           make dist-py-wheel
           make dist-check
+          # The container writes the target dir as root; hand it back so the
+          # cache save can read it.
+          sudo chown -R "$(id -u):$(id -g)" /tmp/cibw-cargo-target
+          du -sh /tmp/cibw-cargo-target
         shell: bash
         if: matrix.os == 'ubuntu-latest'
 
