@@ -46,6 +46,9 @@ rattler_shell = "0.27"
 # Astral's fork; must match rattler's reqwest-middleware so client types unify.
 # Provides the authenticated `reqwest::Client` used for private conda channels.
 reqwest-middleware = { package = "astral-reqwest-middleware", version = "0.5" }
+# Same fork, for the transient-failure retry layer on that client. rattler
+# retries only connect/timeout errors, never an HTTP status.
+reqwest-retry = { package = "astral-reqwest-retry", version = "0.9.1" }
 tar = "0.4.44"
 minijinja = "2"
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros"] }
