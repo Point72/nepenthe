@@ -99,7 +99,24 @@ rustup target add aarch64-unknown-linux-gnu
 rustup target add x86_64-unknown-linux-gnu
 rustup show
 """
-environment = {PATH="$HOME/.cargo/bin:$PATH", CARGO_TERM_COLOR="always"}
+# cibuildwheel mounts the host filesystem at /host, so pointing cargo there keeps
+# the wheel build's state outside the container, where the workflow can cache it.
+# The in-container build is the one compile in CI that Swatinem/rust-cache cannot
+# reach, and it was taking 17 of the job's 34 minutes.
+#
+# Both CARGO_HOME and CARGO_TARGET_DIR, not just the target dir: rust-cache
+# caches ~/.cargo alongside ./target for the same reason. With only the target
+# dir cached the container re-downloads and re-extracts every crate each run,
+# which is most of the win thrown away. cibuildwheel applies this environment to
+# before-all too, so rustup installs its shims under the cached CARGO_HOME and
+# PATH points there rather than at the container's own ~/.cargo.
+#
+# CARGO_INCREMENTAL=0 because incremental artifacts are large, never reused
+# across runs, and would bloat the cache; rust-cache sets it for the same reason.
+#
+# /tmp rather than a runner-specific path so a local `make dist-py-wheel` also
+# reuses it.
+environment = {PATH="/host/tmp/cibw-cargo-home/bin:$PATH", CARGO_TERM_COLOR="always", CARGO_HOME="/host/tmp/cibw-cargo-home", CARGO_TARGET_DIR="/host/tmp/cibw-cargo-target", CARGO_INCREMENTAL="0"}
 skip = "*i686* *musllinux*"
 manylinux-x86_64-image = "manylinux_2_28"
 
