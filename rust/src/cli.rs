@@ -86,6 +86,8 @@ enum Command {
     DiffVersions(DiffVersionsArgs),
     /// Compose several published environments into one lock.
     Compose(ComposeArgs),
+    /// Report the licenses of a lock's packages and flag denied ones.
+    License(LicenseArgs),
     /// Build a container image (SIF or OCI) from a published environment.
     #[command(subcommand)]
     Image(ImageCommand),
@@ -284,6 +286,35 @@ struct PublishArgs {
     /// Lock file to publish.
     #[arg(long)]
     lock: PathBuf,
+}
+
+#[derive(Args)]
+struct LicenseArgs {
+    /// Report from a local lock file (no registry needed).
+    #[arg(long, conflicts_with_all = ["env", "registry"])]
+    lock: Option<PathBuf>,
+    /// Environment name to resolve from a registry (with `--registry`).
+    #[arg(long, requires = "registry")]
+    env: Option<String>,
+    /// Registry root URL to resolve from (with `--env`).
+    #[arg(long, requires = "env")]
+    registry: Option<String>,
+    /// Target platform (defaults to the current platform).
+    #[arg(long)]
+    platform: Option<String>,
+    /// Python axis value, if the environment fans out over python.
+    #[arg(long)]
+    python: Option<String>,
+    /// Variant axis value (e.g. `cpu`/`gpu`), if any.
+    #[arg(long)]
+    variant: Option<String>,
+    /// Version label to resolve.
+    #[arg(long, default_value = "latest")]
+    label: String,
+    /// License to flag (repeatable); any matching package fails the report.
+    /// Matched case-insensitively and exactly against the conda license string.
+    #[arg(long)]
+    deny: Vec<String>,
 }
 
 #[derive(Args)]
@@ -694,6 +725,7 @@ async fn run_command(command: Command) -> CliResult {
         Command::List(args) => list(args),
         Command::DiffVersions(args) => diff_versions(args),
         Command::Compose(args) => compose(args).await,
+        Command::License(args) => license(args),
         Command::Image(ImageCommand::Build(args)) => image_build(args).await,
         Command::Cache(CacheCommand::Clean { all }) => cache_clean(all),
     }
@@ -888,6 +920,49 @@ fn manifest(args: ManifestArgs) -> CliResult {
             eprintln!("recovered manifest ({source}) → {}", path.display());
         }
         None => print!("{yaml}"),
+    }
+    Ok(())
+}
+
+fn license(args: LicenseArgs) -> CliResult {
+    // Load the lock bytes from either source: a local file, or a registry
+    // release resolved by coordinates + label.
+    let lock_bytes = if let Some(lock_path) = &args.lock {
+        std::fs::read(lock_path)?
+    } else if let (Some(env), Some(registry_url)) = (&args.env, &args.registry) {
+        let registry = Registry::new(SpecStore::new(), registry_url.clone());
+        let platform = args
+            .platform
+            .clone()
+            .unwrap_or_else(|| Platform::current().to_string());
+        let mut coords = Coordinates::new(env.clone(), platform);
+        if let Some(py) = &args.python {
+            coords = coords.with_python(py.clone());
+        }
+        if let Some(v) = &args.variant {
+            coords = coords.with_variant(v.clone());
+        }
+        let label = Label::parse(&args.label);
+        registry.pull(&coords, &label)?
+    } else {
+        return Err("pass --lock <file>, or --env <name> --registry <url>".into());
+    };
+
+    let lock = install::parse_lock(&lock_bytes)?;
+    let by_license = crate::license::collect(&lock)?;
+    print!("{}", crate::license::render_text(&by_license));
+
+    let flagged = crate::license::flagged(&by_license, &args.deny);
+    if !flagged.is_empty() {
+        eprintln!("\ndenied licenses found:");
+        for (license, pkg) in &flagged {
+            eprintln!("  {pkg} ({license})");
+        }
+        return Err(format!(
+            "{} package(s) violate the license deny policy",
+            flagged.len()
+        )
+        .into());
     }
     Ok(())
 }
