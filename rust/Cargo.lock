@@ -1973,6 +1973,7 @@ dependencies = [
  "fsspec_rs",
  "hex",
  "jiff",
+ "libc",
  "minijinja",
  "rattler",
  "rattler_cache",
