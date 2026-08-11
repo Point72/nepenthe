@@ -366,6 +366,23 @@ fn error_chain(error: &dyn std::error::Error) -> String {
     message
 }
 
+/// How many packages may be fetched into the package cache at once.
+///
+/// rattler leaves this unbounded, so every package in the environment can be
+/// in flight simultaneously and each one holds a `.lock` file open in the
+/// package cache. File-descriptor use then scales with environment size and a
+/// large environment exhausts `RLIMIT_NOFILE`, surfacing as a fetch failure:
+///
+/// ```text
+/// failed to fetch daft-0.1.3-pyhd8ed1ab_0.conda: ... failed to open cache
+/// metadata file: '.../daft-0.1.3-pyhd8ed1ab_0.lock': Too many open files
+/// ```
+///
+/// Bounding it decouples descriptor use from package count. Downloads are
+/// network-bound well before this many are in flight, so it costs no
+/// meaningful throughput.
+const MAX_CONCURRENT_FETCHES: usize = 50;
+
 /// Install pre-extracted `records` for one `environment`/`platform` into
 /// `prefix` with rattler's installer (no conda required). Records whose `url`
 /// is a `file://` path are read locally (no network) — this is what lets a
@@ -389,6 +406,7 @@ pub async fn install_records(
 
     rattler::install::Installer::new()
         .with_download_client(crate::net::authenticated_client().map_err(InstallError::Install)?)
+        .with_max_concurrent_requests(MAX_CONCURRENT_FETCHES)
         .with_target_platform(target)
         .install(prefix, records)
         .await

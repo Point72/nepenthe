@@ -145,6 +145,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "astral-reqwest-retry"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48c76a42c052d7a95249b90b83d44e8f1bbde7c8e08dbed50d49c58321815da3"
+dependencies = [
+ "anyhow",
+ "astral-reqwest-middleware",
+ "async-trait",
+ "futures",
+ "getrandom 0.2.17",
+ "http",
+ "hyper",
+ "reqwest 0.13.4",
+ "retry-policies",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "wasmtimer",
+]
+
+[[package]]
 name = "astral-tokio-tar"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1923,6 +1944,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "memo-map"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38d1115007560874e373613744c6fba374c17688327a71c1476d1a5954cc857b"
+
+[[package]]
+name = "minijinja"
+version = "2.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42d74234349a775546a83af0f0c0c0e3a73227dee4950a542cda81a47240b3e6"
+dependencies = [
+ "memo-map",
+ "serde",
+]
+
+[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1948,12 +1985,14 @@ name = "nepenthe-core"
 version = "0.1.0"
 dependencies = [
  "astral-reqwest-middleware",
+ "astral-reqwest-retry",
  "base64",
  "clap",
  "flate2",
  "fsspec_rs",
  "hex",
  "jiff",
+ "minijinja",
  "rattler",
  "rattler_cache",
  "rattler_conda_types",
