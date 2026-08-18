@@ -204,6 +204,10 @@ struct CreateArgs {
     /// Directory to install the environment into.
     #[arg(long)]
     prefix: PathBuf,
+    /// Run each package's `post-link` script (off by default — link scripts are
+    /// arbitrary code and make the install non-hermetic).
+    #[arg(long)]
+    link_scripts: bool,
 }
 
 #[derive(Args)]
@@ -375,6 +379,10 @@ struct UnpackArgs {
     /// Directory to extract the bundle into (defaults to a temporary directory).
     #[arg(long)]
     stage_dir: Option<PathBuf>,
+    /// Run each package's `post-link` script (off by default — link scripts are
+    /// arbitrary code and make the install non-hermetic).
+    #[arg(long)]
+    link_scripts: bool,
 }
 
 #[derive(Args)]
@@ -382,6 +390,10 @@ struct SyncArgs {
     /// Path to the `pyproject.toml` to read (defaults to `./pyproject.toml`).
     #[arg(long, default_value = "pyproject.toml")]
     project: PathBuf,
+    /// Run each package's `post-link` script (off by default — link scripts are
+    /// arbitrary code and make the install non-hermetic).
+    #[arg(long)]
+    link_scripts: bool,
 }
 
 #[derive(Args)]
@@ -739,6 +751,7 @@ async fn create(args: CreateArgs) -> CliResult {
         .platform
         .clone()
         .unwrap_or_else(|| Platform::current().to_string());
+    let link_scripts = install::LinkScripts::from(args.link_scripts);
 
     let summary = if let Some(lock_path) = &args.lock {
         // No registry, no solve: install exactly the packages the lock pins,
@@ -749,7 +762,9 @@ async fn create(args: CreateArgs) -> CliResult {
             Some(env) => env.clone(),
             None => install::sole_environment(&lock)?,
         };
-        let summary = install::install_lock(&lock, &environment, &platform, &args.prefix).await?;
+        let summary =
+            install::install_lock(&lock, &environment, &platform, &args.prefix, link_scripts)
+                .await?;
         install::write_hooks_from_lock(
             &bytes,
             &environment,
@@ -778,7 +793,7 @@ async fn create(args: CreateArgs) -> CliResult {
             coords = coords.with_variant(v.clone());
         }
         let label = Label::parse(&args.label);
-        install::create(&registry, &coords, &label, &args.prefix).await?
+        install::create(&registry, &coords, &label, &args.prefix, link_scripts).await?
     };
 
     println!(
@@ -999,6 +1014,7 @@ async fn unpack(args: UnpackArgs) -> CliResult {
         args.platform.as_deref(),
         &args.prefix,
         args.stage_dir.as_deref(),
+        install::LinkScripts::from(args.link_scripts),
     )
     .await?;
     println!(
@@ -1013,7 +1029,8 @@ async fn unpack(args: UnpackArgs) -> CliResult {
 
 async fn sync(args: SyncArgs) -> CliResult {
     let project = crate::project::read(&args.project)?;
-    let summary = crate::project::sync(&project).await?;
+    let summary =
+        crate::project::sync(&project, install::LinkScripts::from(args.link_scripts)).await?;
     println!(
         "synced {} ({}) at {} — {} packages",
         summary.environment,
@@ -1223,7 +1240,14 @@ async fn shell(args: ShellArgs) -> CliResult {
         None => cache_env_prefix(&coords)?,
     };
     if !prefix.join("conda-meta").is_dir() {
-        install::create(&registry, &coords, &label, &prefix).await?;
+        install::create(
+            &registry,
+            &coords,
+            &label,
+            &prefix,
+            install::LinkScripts::Skip,
+        )
+        .await?;
     }
 
     let shell_program = args
