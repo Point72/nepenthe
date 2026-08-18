@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use url::Url;
 
-use crate::install::{self, InstallError, InstallSummary};
+use crate::install::{self, InstallError, InstallSummary, LinkScripts};
 
 /// Bundle format version written into the manifest.
 const PACK_FORMAT: u32 = 1;
@@ -290,6 +290,7 @@ pub async fn install_pack(
     platform: Option<&str>,
     prefix: &Path,
     stage_dir: Option<&Path>,
+    link_scripts: LinkScripts,
 ) -> Result<InstallSummary, PackError> {
     let (staging, created_temp) = match stage_dir {
         Some(dir) => (dir.to_path_buf(), false),
@@ -304,7 +305,15 @@ pub async fn install_pack(
     };
     std::fs::create_dir_all(&staging)?;
 
-    let result = install_from_staging(pack_path, &staging, environment, platform, prefix).await;
+    let result = install_from_staging(
+        pack_path,
+        &staging,
+        environment,
+        platform,
+        prefix,
+        link_scripts,
+    )
+    .await;
 
     if created_temp {
         let _ = std::fs::remove_dir_all(&staging);
@@ -318,6 +327,7 @@ async fn install_from_staging(
     environment: Option<&str>,
     platform: Option<&str>,
     prefix: &Path,
+    link_scripts: LinkScripts,
 ) -> Result<InstallSummary, PackError> {
     tar::Archive::new(File::open(pack_path)?).unpack(staging)?;
 
@@ -379,7 +389,7 @@ async fn install_from_staging(
             .map_err(|()| PackError::BadUrl(path.display().to_string()))?;
     }
 
-    install::install_records(records, environment, &platform, prefix)
+    install::install_records(records, environment, &platform, prefix, link_scripts)
         .await
         .map_err(PackError::from)
 }
@@ -601,7 +611,7 @@ mod tests {
 
         // 3) install from the bundle into a fresh prefix — offline
         let prefix = base.join("env");
-        let install = install_pack(&bundle, None, None, &prefix, None)
+        let install = install_pack(&bundle, None, None, &prefix, None, LinkScripts::Skip)
             .await
             .expect("install from bundle should succeed");
         assert!(install.packages.iter().any(|p| p.name == "python"));

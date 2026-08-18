@@ -470,15 +470,30 @@ pub async fn run(config: &RunConfig, extra_args: &[String]) -> Result<RunSummary
                     &config.environment,
                     &platform,
                     &base_prefix,
+                    install::LinkScripts::Skip,
                 )
                 .await?;
             }
             if base_prefix != prefix {
                 install::clone_prefix(&base_prefix, &prefix)?;
-                install::install_records(records, &config.environment, &platform, &prefix).await?;
+                install::install_records(
+                    records,
+                    &config.environment,
+                    &platform,
+                    &prefix,
+                    install::LinkScripts::Skip,
+                )
+                .await?;
             }
         } else {
-            install::install_records(records, &config.environment, &platform, &prefix).await?;
+            install::install_records(
+                records,
+                &config.environment,
+                &platform,
+                &prefix,
+                install::LinkScripts::Skip,
+            )
+            .await?;
         }
     }
 

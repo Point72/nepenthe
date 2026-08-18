@@ -330,6 +330,34 @@ pub struct InstallSummary {
     pub packages: Vec<PackageId>,
 }
 
+/// Whether a package's `post-link` / `pre-unlink` scripts run when it is linked
+/// into a prefix.
+///
+/// Skipped by default. Those scripts are arbitrary code shipped inside a
+/// package and run with the installer's privileges, and they are what makes an
+/// install non-hermetic — they can reach the network or bake host state into
+/// the prefix, so a packed bundle stops being reproducible offline. A few
+/// packages (some CUDA and MKL builds, older R builds) do real work there, so a
+/// caller that trusts the channels it installs from can opt in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LinkScripts {
+    /// Link files only; `post-link` / `pre-unlink` scripts are ignored.
+    #[default]
+    Skip,
+    /// Execute each package's `post-link` / `pre-unlink` scripts.
+    Run,
+}
+
+impl From<bool> for LinkScripts {
+    fn from(run: bool) -> Self {
+        if run {
+            Self::Run
+        } else {
+            Self::Skip
+        }
+    }
+}
+
 /// Install the `environment`/`platform` packages from `lock` into `prefix`,
 /// using rattler's installer (no conda required). Packages are fetched into the
 /// shared package cache and linked into the prefix.
@@ -340,9 +368,10 @@ pub async fn install_lock(
     environment: &str,
     platform: &str,
     prefix: &Path,
+    link_scripts: LinkScripts,
 ) -> Result<InstallSummary, InstallError> {
     let records = lock_records(lock, environment, platform)?;
-    install_records(records, environment, platform, prefix).await
+    install_records(records, environment, platform, prefix, link_scripts).await
 }
 
 /// Render `error` and its `source` chain as `outer: cause: root cause`.
@@ -445,6 +474,7 @@ pub async fn install_records(
     environment: &str,
     platform: &str,
     prefix: &Path,
+    link_scripts: LinkScripts,
 ) -> Result<InstallSummary, InstallError> {
     let target = Platform::from_str(platform)
         .map_err(|e| InstallError::Lock(format!("bad platform '{platform}': {e}")))?;
@@ -459,6 +489,7 @@ pub async fn install_records(
         .with_download_client(crate::net::authenticated_client().map_err(InstallError::Install)?)
         .with_max_concurrent_requests(MAX_CONCURRENT_FETCHES)
         .with_target_platform(target)
+        .with_execute_link_scripts(link_scripts == LinkScripts::Run)
         .install(prefix, records)
         .await
         .map_err(|e| InstallError::Install(error_chain(&e)))?;
@@ -489,10 +520,18 @@ pub async fn create(
     coords: &Coordinates,
     label: &Label,
     prefix: &Path,
+    link_scripts: LinkScripts,
 ) -> Result<InstallSummary, InstallError> {
     let bytes = registry.pull(coords, label)?;
     let lock = parse_lock(&bytes)?;
-    let summary = install_lock(&lock, &coords.environment, &coords.platform, prefix).await?;
+    let summary = install_lock(
+        &lock,
+        &coords.environment,
+        &coords.platform,
+        prefix,
+        link_scripts,
+    )
+    .await?;
     // Materialize the environment's activation hooks, recovered from the
     // manifest the lock was solved from: the embedded comment band if present,
     // else the registry's manifest sidecar. Best-effort: a release with no
@@ -1288,7 +1327,7 @@ mod tests {
             std::env::temp_dir().join(format!("nepenthe-install-capstone-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&prefix);
 
-        let summary = install_lock(&lock, "app", &platform, &prefix)
+        let summary = install_lock(&lock, "app", &platform, &prefix, LinkScripts::Skip)
             .await
             .expect("install should succeed");
         assert!(!summary.packages.is_empty());
@@ -1369,7 +1408,7 @@ mod tests {
         let prefix =
             std::env::temp_dir().join(format!("nepenthe-install-xplat-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&prefix);
-        let summary = install_lock(&lock, "app", &host, &prefix)
+        let summary = install_lock(&lock, "app", &host, &prefix, LinkScripts::Skip)
             .await
             .expect("install should succeed");
         assert!(!summary.packages.is_empty());
