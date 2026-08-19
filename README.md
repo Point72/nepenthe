@@ -1,7 +1,7 @@
 <a href="https://github.com/point72/nepenthe">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://github.com/point72/nepenthe/raw/main/docs/img/logo-dark.png?raw=true">
-    <img alt="nepenthe logo, overlapping blue speech bubbles" src="https://github.com/point72/nepenthe/raw/main/docs/img/logo-light.png?raw=true" width="400">
+    <img alt="nepenthe logo, a greek-style pitcher jar with blue liquid" src="https://github.com/point72/nepenthe/raw/main/docs/img/logo-light.png?raw=true" width="400">
   </picture>
 </a>
 
