@@ -10,6 +10,7 @@ Notes for editors:
 
 **User Guide**
 
+- [Overview](Overview)
 - [Motivation](Motivation)
 - [Installation](Installation)
 - [Concepts](Concepts)

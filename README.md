@@ -48,8 +48,8 @@ re-solving.
 <br />
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/img/frozen-environment-inverted.svg">
-  <img width=800 src="docs/img/frozen-environment.svg" alt="An unpinned list of dependencies is solved once into a fully-pinned environment.">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Point72/nepenthe/refs/heads/main/docs/img/frozen-environment-inverted.svg">
+  <img width=800 src="https://raw.githubusercontent.com/Point72/nepenthe/refs/heads/main/docs/img/frozen-environment.svg" alt="An unpinned list of dependencies is solved once into a fully-pinned environment.">
 </picture>
 
 <br />
@@ -59,8 +59,8 @@ set; each release produces a new frozen environment, and teams move between
 versions on their own timeline.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/img/environment-evolution-inverted.svg">
-  <img width=800 src="docs/img/environment-evolution.svg" alt="Editing the root dependency list over time (arrow down the left) produces a new fully-pinned environment at each step (right).">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Point72/nepenthe/refs/heads/main/docs/img/environment-evolution-inverted.svg">
+  <img width=800 src="https://raw.githubusercontent.com/Point72/nepenthe/refs/heads/main/docs/img/environment-evolution.svg" alt="Editing the root dependency list over time (arrow down the left) produces a new fully-pinned environment at each step (right).">
 </picture>
 
 This is different from per-project lockfiles (pixi, uv) and re-solved manifests
