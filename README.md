@@ -178,3 +178,7 @@ runnable [`rust/examples/`](rust/examples) for the producer side.
 Contributions are welcome under the [Apache 2.0 license](LICENSE). See
 [Contributing](docs/wiki/contribute/Contribute.md) and
 [Build from Source](docs/wiki/contribute/Build-from-Source.md).
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE) for details.
