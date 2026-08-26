@@ -15,7 +15,7 @@ authors = [
 description = "Forget your environment sorrows"
 readme = "README.md"
 license = { text = "Apache-2.0" }
-version = "0.1.0"
+version = "0.1.1"
 requires-python = ">=3.11"
 keywords = []
 
@@ -61,7 +61,7 @@ Repository = "https://github.com/Point72/nepenthe"
 Homepage = "https://github.com/Point72/nepenthe"
 
 [tool.bumpversion]
-current_version = "0.1.0"
+current_version = "0.1.1"
 commit = true
 tag = true
 commit_args = "-s"
