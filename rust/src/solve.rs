@@ -361,7 +361,9 @@ fn virtual_packages(
     }
 
     let mut by_name: BTreeMap<String, GenericVirtualPackage> =
-        VirtualPackages::detect_for_platform(platform, &typed)
+        // `None` cache dir: detection is not cached, matching the behaviour
+        // before rattler_virtual_packages 5.0 added the parameter.
+        VirtualPackages::detect_for_platform(platform, &typed, None)
             .map_err(|e| SolveError::Parse(format!("virtual package detection failed: {e}")))?
             .into_generic_virtual_packages()
             .map(|g| (g.name.as_normalized().to_string(), g))

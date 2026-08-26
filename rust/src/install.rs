@@ -330,6 +330,34 @@ pub struct InstallSummary {
     pub packages: Vec<PackageId>,
 }
 
+/// Whether a package's `post-link` / `pre-unlink` scripts run when it is linked
+/// into a prefix.
+///
+/// Skipped by default. Those scripts are arbitrary code shipped inside a
+/// package and run with the installer's privileges, and they are what makes an
+/// install non-hermetic — they can reach the network or bake host state into
+/// the prefix, so a packed bundle stops being reproducible offline. A few
+/// packages (some CUDA and MKL builds, older R builds) do real work there, so a
+/// caller that trusts the channels it installs from can opt in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LinkScripts {
+    /// Link files only; `post-link` / `pre-unlink` scripts are ignored.
+    #[default]
+    Skip,
+    /// Execute each package's `post-link` / `pre-unlink` scripts.
+    Run,
+}
+
+impl From<bool> for LinkScripts {
+    fn from(run: bool) -> Self {
+        if run {
+            Self::Run
+        } else {
+            Self::Skip
+        }
+    }
+}
+
 /// Install the `environment`/`platform` packages from `lock` into `prefix`,
 /// using rattler's installer (no conda required). Packages are fetched into the
 /// shared package cache and linked into the prefix.
@@ -340,9 +368,10 @@ pub async fn install_lock(
     environment: &str,
     platform: &str,
     prefix: &Path,
+    link_scripts: LinkScripts,
 ) -> Result<InstallSummary, InstallError> {
     let records = lock_records(lock, environment, platform)?;
-    install_records(records, environment, platform, prefix).await
+    install_records(records, environment, platform, prefix, link_scripts).await
 }
 
 /// Render `error` and its `source` chain as `outer: cause: root cause`.
@@ -366,6 +395,73 @@ fn error_chain(error: &dyn std::error::Error) -> String {
     message
 }
 
+/// How many packages may be fetched into the package cache at once.
+///
+/// rattler leaves this unbounded, so every package in the environment can be
+/// in flight simultaneously and each one holds a `.lock` file open in the
+/// package cache. File-descriptor use then scales with environment size and a
+/// large environment exhausts `RLIMIT_NOFILE`, surfacing as a fetch failure:
+///
+/// ```text
+/// failed to fetch daft-0.1.3-pyhd8ed1ab_0.conda: ... failed to open cache
+/// metadata file: '.../daft-0.1.3-pyhd8ed1ab_0.lock': Too many open files
+/// ```
+///
+/// Bounding it decouples descriptor use from package count. Downloads are
+/// network-bound well before this many are in flight, so it costs no
+/// meaningful throughput.
+const MAX_CONCURRENT_FETCHES: usize = 50;
+
+/// Descriptors to ask for before installing, capped by the hard limit.
+///
+/// rattler's package cache holds one `.lock` file open per package for the
+/// duration of an install, so descriptor use tracks environment size — a
+/// 1277-package environment peaks around 1300 open descriptors. Against the
+/// common 1024 soft limit that fails partway through as:
+///
+/// ```text
+/// failed to fetch <pkg>: ... failed to open cache metadata file:
+/// '.../<pkg>.lock': Too many open files (os error 24)
+/// ```
+///
+/// Well clear of any environment we publish, with room for growth.
+const DESIRED_OPEN_FILES: u64 = 65536;
+
+/// Raise this process's soft `RLIMIT_NOFILE` toward [`DESIRED_OPEN_FILES`].
+///
+/// A process may raise its own soft limit up to the hard limit without
+/// privileges, so doing it here fixes every caller — the CLI, the Python
+/// module, and anything embedding this crate — rather than requiring each
+/// container image and CI job to set `ulimit` for itself.
+///
+/// Best effort: the hard limit is the ceiling and cannot be raised without
+/// privileges, so a process confined to a low hard limit is left as it was and
+/// the install fails with the error above rather than something more obscure.
+#[cfg(unix)]
+fn raise_open_file_limit() {
+    // SAFETY: both calls take a valid, correctly sized `rlimit` and are checked
+    // for failure. No invariant of the caller depends on the outcome.
+    unsafe {
+        let mut limit: libc::rlimit = std::mem::zeroed();
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) != 0 {
+            return;
+        }
+        let target = (DESIRED_OPEN_FILES as libc::rlim_t).min(limit.rlim_max);
+        if limit.rlim_cur >= target {
+            return;
+        }
+        let raised = libc::rlimit {
+            rlim_cur: target,
+            rlim_max: limit.rlim_max,
+        };
+        libc::setrlimit(libc::RLIMIT_NOFILE, &raised);
+    }
+}
+
+/// No-op: Windows has no `RLIMIT_NOFILE`.
+#[cfg(not(unix))]
+fn raise_open_file_limit() {}
+
 /// Install pre-extracted `records` for one `environment`/`platform` into
 /// `prefix` with rattler's installer (no conda required). Records whose `url`
 /// is a `file://` path are read locally (no network) — this is what lets a
@@ -378,9 +474,11 @@ pub async fn install_records(
     environment: &str,
     platform: &str,
     prefix: &Path,
+    link_scripts: LinkScripts,
 ) -> Result<InstallSummary, InstallError> {
     let target = Platform::from_str(platform)
         .map_err(|e| InstallError::Lock(format!("bad platform '{platform}': {e}")))?;
+    raise_open_file_limit();
     let packages = {
         let mut ids: Vec<PackageId> = records.iter().map(PackageId::from_record).collect();
         ids.sort();
@@ -389,7 +487,9 @@ pub async fn install_records(
 
     rattler::install::Installer::new()
         .with_download_client(crate::net::authenticated_client().map_err(InstallError::Install)?)
+        .with_max_concurrent_requests(MAX_CONCURRENT_FETCHES)
         .with_target_platform(target)
+        .with_execute_link_scripts(link_scripts == LinkScripts::Run)
         .install(prefix, records)
         .await
         .map_err(|e| InstallError::Install(error_chain(&e)))?;
@@ -420,10 +520,18 @@ pub async fn create(
     coords: &Coordinates,
     label: &Label,
     prefix: &Path,
+    link_scripts: LinkScripts,
 ) -> Result<InstallSummary, InstallError> {
     let bytes = registry.pull(coords, label)?;
     let lock = parse_lock(&bytes)?;
-    let summary = install_lock(&lock, &coords.environment, &coords.platform, prefix).await?;
+    let summary = install_lock(
+        &lock,
+        &coords.environment,
+        &coords.platform,
+        prefix,
+        link_scripts,
+    )
+    .await?;
     // Materialize the environment's activation hooks, recovered from the
     // manifest the lock was solved from: the embedded comment band if present,
     // else the registry's manifest sidecar. Best-effort: a release with no
@@ -806,6 +914,32 @@ mod tests {
             pkg("numpy", "2.1.0", "py311h0").to_string(),
             "numpy=2.1.0=py311h0"
         );
+    }
+
+    /// Raising is best effort, but it must never *lower* the limit, and must
+    /// leave the hard limit alone.
+    #[cfg(unix)]
+    #[test]
+    fn raising_the_file_limit_never_lowers_it() {
+        // SAFETY: reads the current limits into a valid, correctly sized value.
+        let read = || unsafe {
+            let mut limit: libc::rlimit = std::mem::zeroed();
+            assert_eq!(libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit), 0);
+            (limit.rlim_cur, limit.rlim_max)
+        };
+
+        let (before_soft, before_hard) = read();
+        raise_open_file_limit();
+        let (after_soft, after_hard) = read();
+
+        assert!(
+            after_soft >= before_soft,
+            "soft limit went backwards: {before_soft} -> {after_soft}"
+        );
+        assert_eq!(after_hard, before_hard, "hard limit must be untouched");
+        // It should reach the target, or the hard ceiling if that is lower.
+        let expected = (DESIRED_OPEN_FILES as libc::rlim_t).min(before_hard);
+        assert!(after_soft >= expected.min(before_soft.max(expected)));
     }
 
     #[test]
@@ -1193,7 +1327,7 @@ mod tests {
             std::env::temp_dir().join(format!("nepenthe-install-capstone-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&prefix);
 
-        let summary = install_lock(&lock, "app", &platform, &prefix)
+        let summary = install_lock(&lock, "app", &platform, &prefix, LinkScripts::Skip)
             .await
             .expect("install should succeed");
         assert!(!summary.packages.is_empty());
@@ -1274,7 +1408,7 @@ mod tests {
         let prefix =
             std::env::temp_dir().join(format!("nepenthe-install-xplat-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&prefix);
-        let summary = install_lock(&lock, "app", &host, &prefix)
+        let summary = install_lock(&lock, "app", &host, &prefix, LinkScripts::Skip)
             .await
             .expect("install should succeed");
         assert!(!summary.packages.is_empty());

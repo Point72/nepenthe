@@ -426,7 +426,7 @@ pub async fn build(
 ) -> Result<ImageSummary, ImageError> {
     // Materialize the environment (self-contained: every package on disk).
     if !prefix.join("conda-meta").is_dir() {
-        install::create(registry, coords, label, prefix).await?;
+        install::create(registry, coords, label, prefix, install::LinkScripts::Skip).await?;
     }
 
     let artifact = match target {

@@ -88,6 +88,8 @@ enum Command {
     Compose(ComposeArgs),
     /// Report the licenses of a lock's packages and flag denied ones.
     License(LicenseArgs),
+    /// Re-derive a lock's content address to verify its integrity.
+    Verify(VerifyArgs),
     /// Build a container image (SIF or OCI) from a published environment.
     #[command(subcommand)]
     Image(ImageCommand),
@@ -206,6 +208,10 @@ struct CreateArgs {
     /// Directory to install the environment into.
     #[arg(long)]
     prefix: PathBuf,
+    /// Run each package's `post-link` script (off by default — link scripts are
+    /// arbitrary code and make the install non-hermetic).
+    #[arg(long)]
+    link_scripts: bool,
 }
 
 #[derive(Args)]
@@ -274,6 +280,34 @@ struct ManifestArgs {
     /// File to write the manifest to (defaults to stdout).
     #[arg(short, long)]
     output: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct VerifyArgs {
+    /// Verify a local lock file's content address (optionally against `--expect`).
+    #[arg(long, conflicts_with_all = ["env", "registry"])]
+    lock: Option<PathBuf>,
+    /// Environment name to resolve from a registry (with `--registry`).
+    #[arg(long, requires = "registry")]
+    env: Option<String>,
+    /// Registry root URL to resolve from (with `--env`).
+    #[arg(long, requires = "env")]
+    registry: Option<String>,
+    /// Target platform (defaults to the current platform).
+    #[arg(long)]
+    platform: Option<String>,
+    /// Python axis value, if the environment fans out over python.
+    #[arg(long)]
+    python: Option<String>,
+    /// Variant axis value (e.g. `cpu`/`gpu`), if any.
+    #[arg(long)]
+    variant: Option<String>,
+    /// Version label to resolve.
+    #[arg(long, default_value = "latest")]
+    label: String,
+    /// For `--lock`: the expected `sha256-<hex>` content address to check.
+    #[arg(long)]
+    expect: Option<String>,
 }
 
 #[derive(Args)]
@@ -406,6 +440,10 @@ struct UnpackArgs {
     /// Directory to extract the bundle into (defaults to a temporary directory).
     #[arg(long)]
     stage_dir: Option<PathBuf>,
+    /// Run each package's `post-link` script (off by default — link scripts are
+    /// arbitrary code and make the install non-hermetic).
+    #[arg(long)]
+    link_scripts: bool,
 }
 
 #[derive(Args)]
@@ -413,6 +451,10 @@ struct SyncArgs {
     /// Path to the `pyproject.toml` to read (defaults to `./pyproject.toml`).
     #[arg(long, default_value = "pyproject.toml")]
     project: PathBuf,
+    /// Run each package's `post-link` script (off by default — link scripts are
+    /// arbitrary code and make the install non-hermetic).
+    #[arg(long)]
+    link_scripts: bool,
 }
 
 #[derive(Args)]
@@ -726,6 +768,7 @@ async fn run_command(command: Command) -> CliResult {
         Command::DiffVersions(args) => diff_versions(args),
         Command::Compose(args) => compose(args).await,
         Command::License(args) => license(args),
+        Command::Verify(args) => verify(args),
         Command::Image(ImageCommand::Build(args)) => image_build(args).await,
         Command::Cache(CacheCommand::Clean { all }) => cache_clean(all),
     }
@@ -771,6 +814,7 @@ async fn create(args: CreateArgs) -> CliResult {
         .platform
         .clone()
         .unwrap_or_else(|| Platform::current().to_string());
+    let link_scripts = install::LinkScripts::from(args.link_scripts);
 
     let summary = if let Some(lock_path) = &args.lock {
         // No registry, no solve: install exactly the packages the lock pins,
@@ -781,7 +825,9 @@ async fn create(args: CreateArgs) -> CliResult {
             Some(env) => env.clone(),
             None => install::sole_environment(&lock)?,
         };
-        let summary = install::install_lock(&lock, &environment, &platform, &args.prefix).await?;
+        let summary =
+            install::install_lock(&lock, &environment, &platform, &args.prefix, link_scripts)
+                .await?;
         install::write_hooks_from_lock(
             &bytes,
             &environment,
@@ -810,7 +856,7 @@ async fn create(args: CreateArgs) -> CliResult {
             coords = coords.with_variant(v.clone());
         }
         let label = Label::parse(&args.label);
-        install::create(&registry, &coords, &label, &args.prefix).await?
+        install::create(&registry, &coords, &label, &args.prefix, link_scripts).await?
     };
 
     println!(
@@ -967,6 +1013,72 @@ fn license(args: LicenseArgs) -> CliResult {
     Ok(())
 }
 
+fn verify(args: VerifyArgs) -> CliResult {
+    use crate::registry::content_address;
+
+    // Local mode: re-derive a lock file's content address, optionally checking
+    // it against an expected `sha256-<hex>`.
+    if let Some(lock_path) = &args.lock {
+        let bytes = std::fs::read(lock_path)?;
+        let address = content_address(&bytes);
+        println!("lock {} → {address}", lock_path.display());
+        if crate::embed::extract_manifest(&bytes)?.is_some() {
+            println!("  embedded manifest band: present");
+        }
+        if let Some(expected) = &args.expect {
+            if expected == &address {
+                println!("  content address: OK (matches --expect)");
+            } else {
+                return Err(format!(
+                    "content address mismatch: expected {expected}, computed {address}"
+                )
+                .into());
+            }
+        }
+        return Ok(());
+    }
+
+    // Registry mode: resolve the release, then re-derive and check the content
+    // address of its lock (and manifest) against what the index records.
+    let (Some(env), Some(registry_url)) = (&args.env, &args.registry) else {
+        return Err("pass --lock <file>, or --env <name> --registry <url>".into());
+    };
+    let registry = Registry::new(SpecStore::new(), registry_url.clone());
+    let platform = args
+        .platform
+        .clone()
+        .unwrap_or_else(|| Platform::current().to_string());
+    let mut coords = Coordinates::new(env.clone(), platform);
+    if let Some(py) = &args.python {
+        coords = coords.with_python(py.clone());
+    }
+    if let Some(v) = &args.variant {
+        coords = coords.with_variant(v.clone());
+    }
+    let label = Label::parse(&args.label);
+
+    let release = registry.resolve(&coords, &label)?;
+    println!(
+        "release {} {} on {}",
+        release.environment, release.version, release.platform
+    );
+
+    // `pull` re-derives the lock's content address and rejects a mismatch, so a
+    // successful pull is a verified lock.
+    registry.pull(&coords, &label)?;
+    println!("  lock {}: OK", release.lock);
+
+    // A published lock relies on a manifest sidecar (the embedded band is
+    // stripped on publish); verify the sidecar's content address too.
+    if let Some(manifest_addr) = &release.manifest {
+        registry.pull_manifest(&coords, &label)?;
+        println!("  manifest {manifest_addr}: OK");
+    }
+
+    println!("verified");
+    Ok(())
+}
+
 fn publish(args: PublishArgs) -> CliResult {
     let registry = args.coords.build_registry();
     let coords = args.coords.coordinates();
@@ -1074,6 +1186,7 @@ async fn unpack(args: UnpackArgs) -> CliResult {
         args.platform.as_deref(),
         &args.prefix,
         args.stage_dir.as_deref(),
+        install::LinkScripts::from(args.link_scripts),
     )
     .await?;
     println!(
@@ -1088,7 +1201,8 @@ async fn unpack(args: UnpackArgs) -> CliResult {
 
 async fn sync(args: SyncArgs) -> CliResult {
     let project = crate::project::read(&args.project)?;
-    let summary = crate::project::sync(&project).await?;
+    let summary =
+        crate::project::sync(&project, install::LinkScripts::from(args.link_scripts)).await?;
     println!(
         "synced {} ({}) at {} — {} packages",
         summary.environment,
@@ -1298,7 +1412,14 @@ async fn shell(args: ShellArgs) -> CliResult {
         None => cache_env_prefix(&coords)?,
     };
     if !prefix.join("conda-meta").is_dir() {
-        install::create(&registry, &coords, &label, &prefix).await?;
+        install::create(
+            &registry,
+            &coords,
+            &label,
+            &prefix,
+            install::LinkScripts::Skip,
+        )
+        .await?;
     }
 
     let shell_program = args

@@ -25,7 +25,7 @@ use rattler_conda_types::{ParseStrictness, Version, VersionSpec};
 use serde::Deserialize;
 
 use crate::backend::SpecStore;
-use crate::install::{self, InstallError, InstallSummary, PackageId};
+use crate::install::{self, InstallError, InstallSummary, LinkScripts, PackageId};
 use crate::name_map::{self, normalize_name};
 use crate::registry::{Coordinates, Label, Registry, RegistryError};
 
@@ -230,13 +230,17 @@ pub fn read_dependencies(pyproject: &Path) -> Result<Vec<String>, ProjectError> 
 /// Install (or update) the environment referenced by a project into its prefix,
 /// resolving the version label against the registry. Performs network I/O; await
 /// inside a tokio runtime.
-pub async fn sync(project: &ProjectFile) -> Result<InstallSummary, ProjectError> {
+pub async fn sync(
+    project: &ProjectFile,
+    link_scripts: LinkScripts,
+) -> Result<InstallSummary, ProjectError> {
     let reference = &project.nepenthe;
     let summary = install::create(
         &reference.registry(),
         &reference.coordinates(),
         &reference.label(),
         &project.resolved_prefix(),
+        link_scripts,
     )
     .await?;
     Ok(summary)

@@ -1,4 +1,9 @@
-# nepenthe
+<a href="https://github.com/point72/nepenthe">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/point72/nepenthe/raw/main/docs/img/logo-dark.png?raw=true">
+    <img alt="nepenthe logo, a greek-style pitcher jar with blue liquid" src="https://github.com/point72/nepenthe/raw/main/docs/img/logo-light.png?raw=true" width="400">
+  </picture>
+</a>
 
 Forget your environment sorrows
 
@@ -43,8 +48,8 @@ re-solving.
 <br />
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/img/frozen-environment-inverted.svg">
-  <img width=800 src="docs/img/frozen-environment.svg" alt="An unpinned list of dependencies is solved once into a fully-pinned environment.">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Point72/nepenthe/refs/heads/main/docs/img/frozen-environment-inverted.svg">
+  <img width=800 src="https://raw.githubusercontent.com/Point72/nepenthe/refs/heads/main/docs/img/frozen-environment.svg" alt="An unpinned list of dependencies is solved once into a fully-pinned environment.">
 </picture>
 
 <br />
@@ -54,8 +59,8 @@ set; each release produces a new frozen environment, and teams move between
 versions on their own timeline.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/img/environment-evolution-inverted.svg">
-  <img width=800 src="docs/img/environment-evolution.svg" alt="Editing the root dependency list over time (arrow down the left) produces a new fully-pinned environment at each step (right).">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Point72/nepenthe/refs/heads/main/docs/img/environment-evolution-inverted.svg">
+  <img width=800 src="https://raw.githubusercontent.com/Point72/nepenthe/refs/heads/main/docs/img/environment-evolution.svg" alt="Editing the root dependency list over time (arrow down the left) produces a new fully-pinned environment at each step (right).">
 </picture>
 
 This is different from per-project lockfiles (pixi, uv) and re-solved manifests
@@ -173,3 +178,7 @@ runnable [`rust/examples/`](rust/examples) for the producer side.
 Contributions are welcome under the [Apache 2.0 license](LICENSE). See
 [Contributing](docs/wiki/contribute/Contribute.md) and
 [Build from Source](docs/wiki/contribute/Build-from-Source.md).
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE) for details.
