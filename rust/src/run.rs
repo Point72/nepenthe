@@ -861,7 +861,7 @@ command = "python -m mytool"
 [tool.nepenthe.run]
 environment = "myenv"
 registry = "file:///srv/nepenthe"
-overlay = { conda = ["polars>=1"], pip = ["rich", "httpx>=0.27"] }
+overlay = { conda = ["polars>=1"], pip = ["rich", "httpx2>=0.27"] }
 "#;
         let dir = std::env::temp_dir().join(format!("nepenthe-run-pip-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -870,7 +870,7 @@ overlay = { conda = ["polars>=1"], pip = ["rich", "httpx>=0.27"] }
 
         let config = RunConfig::from_pyproject(&path).unwrap();
         assert_eq!(config.overlay_conda, vec!["polars>=1"]);
-        assert_eq!(config.overlay_pip, vec!["rich", "httpx>=0.27"]);
+        assert_eq!(config.overlay_pip, vec!["rich", "httpx2>=0.27"]);
 
         std::fs::remove_dir_all(&dir).ok();
     }
