@@ -312,6 +312,7 @@ struct SbomArgs {
     output: Option<PathBuf>,
 }
 
+#[derive(Args)]
 struct VerifyArgs {
     /// Verify a local lock file's content address (optionally against `--expect`).
     #[arg(long, conflicts_with_all = ["env", "registry"])]
