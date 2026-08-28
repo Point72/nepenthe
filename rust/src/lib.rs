@@ -34,6 +34,7 @@ pub mod producer;
 pub mod project;
 pub mod registry;
 pub mod run;
+pub mod sbom;
 pub mod selector;
 pub mod solve;
 
