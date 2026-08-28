@@ -43,6 +43,10 @@ prefix = ".venv"                     # optional: install location (default ".ven
 `version` accepts a label: `latest`, an exact version (`1.3.0`), or a range
 (`>=1.2,<2`).
 
+Two optional sub-tables, `[tool.nepenthe.package-mappings]` and
+`[tool.nepenthe.extras-mappings]`, adjust how PyPI requirement names are matched
+against conda packages — see [Overriding the name map](#overriding-the-name-map).
+
 ## `sync` — install the referenced environment
 
 ```bash
@@ -119,6 +123,39 @@ regenerated from the upstream source with a single command — see
 [Updating the name map](#updating-the-name-map) below. Even so, treat an
 occasional `missing` as "couldn't confirm" rather than "definitely absent" for an
 obscure or very new package.
+
+### Overriding the name map
+
+The vendored map only knows what conda-forge knows. A project that depends on
+distributions packaged elsewhere — or that packages its own — can say how those
+names translate, without waiting for the vendored table to be regenerated:
+
+```toml
+[tool.nepenthe.package-mappings]
+example-package = "example-conda-package"
+
+[tool.nepenthe.extras-mappings]
+"example-package[extra]" = ["example-package", "example-package-extra"]
+```
+
+`package-mappings` renames a distribution, taking precedence over the vendored
+entry (or supplying one where there is none).
+
+`extras-mappings` handles a case a rename cannot express. conda has no
+equivalent of a PyPI extras group, so a distribution that splits its optional
+features into separate conda packages maps *one* requirement onto *several*
+packages. `check` then requires every one of them: the requirement is **ok**
+only when all are present and satisfy its version specifier, and reports the
+first that is **missing** or in **conflict**. `nepenthe try` expands the same
+way, adding one conda spec per package.
+
+Keys are normalized, so casing, separator style and the order of extras in the
+key do not matter. An extras group with no mapping resolves to the distribution
+name alone — the same result the requirement would have produced without the
+group.
+
+Both tables also apply to `nepenthe try --project`, which reads them without
+requiring the rest of the `[tool.nepenthe]` stanza.
 
 ### Updating the name map
 

@@ -1356,7 +1356,10 @@ async fn try_solve(args: TryArgs) -> CliResult {
     let mut specs = args.with.clone();
     if let Some(project) = &args.project {
         let deps = crate::project::read_dependencies(project)?;
-        specs.extend(crate::project::requirements_to_conda_specs(&deps));
+        let overrides = crate::project::read_name_overrides(project)?;
+        specs.extend(crate::project::requirements_to_conda_specs(
+            &deps, &overrides,
+        ));
     }
     if specs.is_empty() {
         return Err("nothing to try: pass --with <spec> and/or --project <pyproject.toml>".into());

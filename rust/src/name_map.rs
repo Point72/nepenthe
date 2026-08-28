@@ -52,6 +52,108 @@ pub fn len() -> usize {
     table().len()
 }
 
+/// The lookup key for a requirement that carries an extras group: the
+/// normalized distribution name followed by its sorted, normalized extras.
+pub fn extras_key(name: &str, extras: &[String]) -> String {
+    let mut extras: Vec<String> = extras.iter().map(|e| normalize_name(e)).collect();
+    extras.sort();
+    extras.dedup();
+    format!("{}[{}]", normalize_name(name), extras.join(","))
+}
+
+/// Project-supplied additions to the vendored table.
+///
+/// The vendored table covers what conda-forge knows about. A project that
+/// depends on distributions packaged outside conda-forge — or that packages its
+/// own — needs to say how those names translate, without waiting for the
+/// vendored table to be regenerated.
+///
+/// Two kinds of override are supported:
+///
+/// - **package**: a distribution name maps to a different conda package name,
+///   overriding the vendored entry (or supplying one where there is none).
+/// - **extras**: a requirement's extras group maps to *several* conda packages.
+///   conda has no equivalent of an extras group, so a distribution that splits
+///   its optional features into separate conda packages cannot be expressed as
+///   a rename.
+///
+/// An extras group with no override resolves to the distribution name alone,
+/// which is what the extras-less requirement would have produced.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Overrides {
+    packages: BTreeMap<String, String>,
+    extras: BTreeMap<String, Vec<String>>,
+}
+
+impl Overrides {
+    /// Build from raw (un-normalized) `package` and `extras` tables. `packages`
+    /// is keyed by distribution name; `extras` by a `name[extra,…]` string.
+    /// Keys are normalized, so casing, separator style and extras order in the
+    /// source are irrelevant. An `extras` key without a `[…]` group is ignored.
+    pub fn new(
+        packages: impl IntoIterator<Item = (String, String)>,
+        extras: impl IntoIterator<Item = (String, Vec<String>)>,
+    ) -> Self {
+        let packages = packages
+            .into_iter()
+            .map(|(pypi, conda)| (normalize_name(&pypi), conda))
+            .collect();
+        let extras = extras
+            .into_iter()
+            .filter_map(|(key, conda)| Some((normalize_extras_key(&key)?, conda)))
+            .collect();
+        Self { packages, extras }
+    }
+
+    /// Whether any override is configured.
+    pub fn is_empty(&self) -> bool {
+        self.packages.is_empty() && self.extras.is_empty()
+    }
+
+    /// The conda package name(s) a requirement resolves to. `extras` is the
+    /// requirement's extras group, empty when it has none.
+    ///
+    /// An extras override wins; otherwise a package override; otherwise the
+    /// vendored table; otherwise the normalized name itself.
+    pub fn conda_names(&self, pypi_name: &str, extras: &[String]) -> Vec<String> {
+        if !extras.is_empty() {
+            if let Some(names) = self.extras.get(&extras_key(pypi_name, extras)) {
+                return names.clone();
+            }
+        }
+        vec![self.conda_name(pypi_name)]
+    }
+
+    /// The single conda package name a distribution name resolves to, ignoring
+    /// any extras group.
+    pub fn conda_name(&self, pypi_name: &str) -> String {
+        let normalized = normalize_name(pypi_name);
+        if let Some(conda) = self.packages.get(&normalized) {
+            return conda.clone();
+        }
+        pypi_to_conda(&normalized)
+            .map(str::to_string)
+            .unwrap_or(normalized)
+    }
+}
+
+/// Normalize a `name[extra,…]` key. Returns `None` when there is no extras
+/// group, or when the group is empty or unterminated.
+fn normalize_extras_key(key: &str) -> Option<String> {
+    let (name, rest) = key.split_once('[')?;
+    let extras = rest.strip_suffix(']')?;
+    let extras: Vec<String> = extras
+        .split(',')
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+        .map(str::to_string)
+        .collect();
+    if name.trim().is_empty() || extras.is_empty() {
+        return None;
+    }
+    Some(extras_key(name.trim(), &extras))
+}
+
 fn parse_tsv(text: &str) -> BTreeMap<String, String> {
     text.lines()
         .filter_map(|line| {
@@ -171,6 +273,72 @@ mod tests {
         // An identity name is not in the divergent table.
         assert_eq!(pypi_to_conda("numpy"), None);
         assert!(len() > 50);
+    }
+
+    #[test]
+    fn overrides_default_to_the_vendored_table() {
+        let overrides = Overrides::default();
+        assert!(overrides.is_empty());
+        assert_eq!(overrides.conda_name("opencv-python"), "opencv");
+        assert_eq!(overrides.conda_name("numpy"), "numpy");
+        assert_eq!(overrides.conda_name("Flask_SQLAlchemy"), "flask-sqlalchemy");
+    }
+
+    #[test]
+    fn a_package_override_wins_over_the_vendored_table() {
+        let overrides = Overrides::new(
+            [("OpenCV_Python".to_string(), "example-opencv".to_string())],
+            [],
+        );
+        assert!(!overrides.is_empty());
+        // The key is normalized, so any spelling of the requirement matches.
+        assert_eq!(overrides.conda_name("opencv-python"), "example-opencv");
+    }
+
+    #[test]
+    fn an_extras_override_expands_to_several_packages() {
+        let overrides = Overrides::new(
+            [],
+            [(
+                "Example.Package[Two, One]".to_string(),
+                vec![
+                    "example-package".to_string(),
+                    "example-package-extra".to_string(),
+                ],
+            )],
+        );
+        // Extras order and separator style in the key do not matter.
+        assert_eq!(
+            overrides.conda_names("example-package", &["one".to_string(), "two".to_string()]),
+            vec!["example-package", "example-package-extra"]
+        );
+        // A different extras group is not the same key.
+        assert_eq!(
+            overrides.conda_names("example-package", &["one".to_string()]),
+            vec!["example-package"]
+        );
+    }
+
+    #[test]
+    fn an_unmapped_extras_group_resolves_to_the_name_alone() {
+        let overrides = Overrides::default();
+        assert_eq!(
+            overrides.conda_names("opencv-python", &["extra".to_string()]),
+            vec!["opencv"]
+        );
+    }
+
+    #[test]
+    fn extras_keys_without_a_group_are_ignored() {
+        let overrides = Overrides::new(
+            [],
+            [
+                ("example-package".to_string(), vec!["a".to_string()]),
+                ("example-package[]".to_string(), vec!["b".to_string()]),
+                ("[extra]".to_string(), vec!["c".to_string()]),
+            ],
+        );
+        assert!(overrides.is_empty());
     }
 
     #[test]
