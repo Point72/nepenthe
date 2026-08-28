@@ -275,9 +275,10 @@ fn build<'py>(
 }
 
 /// Resolve a published lock and install it into `prefix` (no conda required).
+/// Set `link_scripts` to run each package's `post-link` script (off by default).
 /// Returns an install summary dict.
 #[pyfunction]
-#[pyo3(signature = (env, registry, prefix, *, platform = None, python = None, variant = None, label = "latest"))]
+#[pyo3(signature = (env, registry, prefix, *, platform = None, python = None, variant = None, label = "latest", link_scripts = false))]
 #[allow(clippy::too_many_arguments)]
 fn create<'py>(
     py: Python<'py>,
@@ -288,12 +289,22 @@ fn create<'py>(
     python: Option<String>,
     variant: Option<String>,
     label: &str,
+    link_scripts: bool,
 ) -> PyResult<Bound<'py, PyDict>> {
     let registry = Registry::new(SpecStore::new(), registry);
     let coords = coordinates(env, platform, python, variant);
     let label = Label::parse(label);
-    let summary =
-        block_on(py, install::create(&registry, &coords, &label, &prefix))?.map_err(err)?;
+    let summary = block_on(
+        py,
+        install::create(
+            &registry,
+            &coords,
+            &label,
+            &prefix,
+            install::LinkScripts::from(link_scripts),
+        ),
+    )?
+    .map_err(err)?;
     summary_dict(py, &summary)
 }
 
@@ -472,9 +483,10 @@ fn pack<'py>(
 
 /// Install an environment from a packed bundle into `prefix`, fully offline.
 /// `env` defaults to the bundle's environment and `platform` to the current
-/// platform. Returns an install summary dict.
+/// platform. Set `link_scripts` to run each package's `post-link` script (off by
+/// default). Returns an install summary dict.
 #[pyfunction]
-#[pyo3(signature = (pack, prefix, *, env = None, platform = None, stage_dir = None))]
+#[pyo3(signature = (pack, prefix, *, env = None, platform = None, stage_dir = None, link_scripts = false))]
 fn unpack<'py>(
     py: Python<'py>,
     pack: PathBuf,
@@ -482,6 +494,7 @@ fn unpack<'py>(
     env: Option<String>,
     platform: Option<String>,
     stage_dir: Option<PathBuf>,
+    link_scripts: bool,
 ) -> PyResult<Bound<'py, PyDict>> {
     let summary = block_on(
         py,
@@ -491,6 +504,7 @@ fn unpack<'py>(
             platform.as_deref(),
             &prefix,
             stage_dir.as_deref(),
+            install::LinkScripts::from(link_scripts),
         ),
     )?
     .map_err(err)?;
@@ -498,14 +512,23 @@ fn unpack<'py>(
 }
 
 /// Install the environment a project's `pyproject.toml` references in its
-/// `[tool.nepenthe]` stanza. `project` defaults to `./pyproject.toml`. Returns
-/// an install summary dict.
+/// `[tool.nepenthe]` stanza. `project` defaults to `./pyproject.toml`. Set
+/// `link_scripts` to run each package's `post-link` script (off by default).
+/// Returns an install summary dict.
 #[pyfunction]
-#[pyo3(signature = (project = None))]
-fn sync<'py>(py: Python<'py>, project: Option<PathBuf>) -> PyResult<Bound<'py, PyDict>> {
+#[pyo3(signature = (project = None, *, link_scripts = false))]
+fn sync<'py>(
+    py: Python<'py>,
+    project: Option<PathBuf>,
+    link_scripts: bool,
+) -> PyResult<Bound<'py, PyDict>> {
     let path = project.unwrap_or_else(|| PathBuf::from("pyproject.toml"));
     let file = project::read(&path).map_err(err)?;
-    let summary = block_on(py, project::sync(&file))?.map_err(err)?;
+    let summary = block_on(
+        py,
+        project::sync(&file, install::LinkScripts::from(link_scripts)),
+    )?
+    .map_err(err)?;
     summary_dict(py, &summary)
 }
 

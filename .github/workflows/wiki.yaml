@@ -25,8 +25,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Prepare wiki
-        run: cp README.md docs/wiki/Home.md
+      # - name: Prepare wiki
+      #   run: cp README.md docs/wiki/Home.md
 
       - name: Publish wiki
         uses: Andrew-Chen-Wang/github-wiki-action@1bbb4280446f9630e8e21a18012cbacf3b0f992e  # v5.0.6

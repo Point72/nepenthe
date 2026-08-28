@@ -117,6 +117,11 @@ If the environment declares [`activation`](Manifests#activation) hooks, `create`
 also materializes them into `etc/conda/activate.d/` (recovered from the manifest
 the lock was solved from), so a subsequent [`activate`](#activate) runs them.
 
+Packages' `post-link` scripts are **not** run: they are arbitrary code shipped
+inside a package and they make an install non-hermetic. Pass `--link-scripts` to
+`create`, `unpack`, or `sync` to execute them anyway, for channels you trust and
+packages that depend on them.
+
 ### Publish, show, pull
 
 ```bash

@@ -53,7 +53,7 @@ nepenthe run --config script.py    # runs `python script.py` in the environment
 nepenthe run --with "polars>=1"
 
 # add a PyPI overlay (installed with uv)
-nepenthe run --with-pip "rich" --with-pip "httpx>=0.27"
+nepenthe run --with-pip "rich" --with-pip "httpx2>=0.27"
 
 # replace the command entirely (everything after `--`)
 nepenthe run -- python -c "import polars; print(polars.__version__)"
