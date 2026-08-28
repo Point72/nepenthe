@@ -117,6 +117,14 @@ pub struct ProjectRef {
     /// Prefix to install into (defaults to `.venv`).
     #[serde(default)]
     pub prefix: Option<PathBuf>,
+    /// Conda package name to use for a PyPI distribution name, overriding the
+    /// [vendored mapping](crate::name_map).
+    #[serde(default, rename = "package-mappings")]
+    pub package_mappings: std::collections::BTreeMap<String, String>,
+    /// Conda packages a requirement's extras group expands to, keyed by
+    /// `name[extra,…]`.
+    #[serde(default, rename = "extras-mappings")]
+    pub extras_mappings: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 impl ProjectRef {
@@ -150,6 +158,11 @@ impl ProjectRef {
 
     fn registry(&self) -> Registry {
         Registry::new(SpecStore::new(), self.registry.clone())
+    }
+
+    /// The project's additions to the vendored PyPI→conda name mapping.
+    pub fn name_overrides(&self) -> name_map::Overrides {
+        name_map::Overrides::new(self.package_mappings.clone(), self.extras_mappings.clone())
     }
 }
 
@@ -225,6 +238,19 @@ pub fn read_dependencies(pyproject: &Path) -> Result<Vec<String>, ProjectError> 
     let text = std::fs::read_to_string(pyproject)?;
     let raw: RawPyProject = toml::from_str(&text).map_err(|e| ProjectError::Toml(e.to_string()))?;
     Ok(raw.project.map(|p| p.dependencies).unwrap_or_default())
+}
+
+/// Read the name-mapping overrides from a `pyproject.toml`, without requiring a
+/// `[tool.nepenthe]` stanza. Returns the empty set when there is none, so `try`
+/// honours a project's overrides but does not demand the stanza.
+pub fn read_name_overrides(pyproject: &Path) -> Result<name_map::Overrides, ProjectError> {
+    let text = std::fs::read_to_string(pyproject)?;
+    let raw: RawPyProject = toml::from_str(&text).map_err(|e| ProjectError::Toml(e.to_string()))?;
+    Ok(raw
+        .tool
+        .and_then(|t| t.nepenthe)
+        .map(|n| n.name_overrides())
+        .unwrap_or_default())
 }
 
 /// Install (or update) the environment referenced by a project into its prefix,
@@ -336,8 +362,14 @@ impl CheckReport {
 /// When a PyPI name differs from its conda counterpart (e.g. `opencv-python` vs
 /// `opencv`), the [grayskull-derived mapping](crate::name_map) is consulted so
 /// the dependency still resolves; only names absent under both spellings report
-/// as [`Missing`](DependencyStatus::Missing).
-pub fn check_dependencies(dependencies: &[String], packages: &[PackageId]) -> CheckReport {
+/// as [`Missing`](DependencyStatus::Missing). `overrides` takes precedence over
+/// the vendored mapping, and can expand a requirement's extras group into
+/// several conda packages, all of which must then be present and satisfied.
+pub fn check_dependencies(
+    dependencies: &[String],
+    packages: &[PackageId],
+    overrides: &name_map::Overrides,
+) -> CheckReport {
     let by_name: std::collections::BTreeMap<String, &PackageId> = packages
         .iter()
         .map(|p| (normalize_name(&p.name), p))
@@ -349,10 +381,9 @@ pub fn check_dependencies(dependencies: &[String], packages: &[PackageId]) -> Ch
             None => DependencyStatus::Skipped {
                 reason: "not a name+version requirement (direct URL or unparseable)".to_string(),
             },
-            Some((name, specifier)) => match resolve_package(&name, &by_name) {
-                None => DependencyStatus::Missing { name },
-                Some(package) => check_version(name, &specifier, &package.version),
-            },
+            Some((name, extras, specifier)) => {
+                check_resolved(&overrides.conda_names(&name, &extras), &specifier, &by_name)
+            }
         };
         checked.push(CheckedDependency {
             requirement: requirement.clone(),
@@ -364,17 +395,27 @@ pub fn check_dependencies(dependencies: &[String], packages: &[PackageId]) -> Ch
     }
 }
 
-/// Resolve a normalized requirement name to an environment package: first by a
-/// direct name match, then via the PyPI→conda [name mapping](crate::name_map).
-fn resolve_package<'a>(
-    name: &str,
-    by_name: &std::collections::BTreeMap<String, &'a PackageId>,
-) -> Option<&'a PackageId> {
-    if let Some(package) = by_name.get(name) {
-        return Some(package);
+/// Check every conda package a requirement resolved to. The requirement is
+/// satisfied only when all of them are; the first failure is reported.
+fn check_resolved(
+    names: &[String],
+    specifier: &str,
+    by_name: &std::collections::BTreeMap<String, &PackageId>,
+) -> DependencyStatus {
+    let mut last = DependencyStatus::Skipped {
+        reason: "requirement resolved to no conda package".to_string(),
+    };
+    for name in names {
+        let normalized = normalize_name(name);
+        let Some(package) = by_name.get(&normalized) else {
+            return DependencyStatus::Missing { name: normalized };
+        };
+        last = check_version(normalized, specifier, &package.version);
+        if !matches!(last, DependencyStatus::Satisfied { .. }) {
+            return last;
+        }
     }
-    let conda = name_map::pypi_to_conda(name)?;
-    by_name.get(&normalize_name(conda)).copied()
+    last
 }
 
 /// Pull the environment's lock from the registry and check the project's
@@ -394,7 +435,11 @@ pub async fn check(
     let bytes = registry.pull(&coords, &reference.label())?;
     let lock = install::parse_lock(&bytes)?;
     let packages = install::lock_packages(&lock, &reference.environment, &coords.platform)?;
-    Ok(check_dependencies(&project.dependencies, &packages))
+    Ok(check_dependencies(
+        &project.dependencies,
+        &packages,
+        &reference.name_overrides(),
+    ))
 }
 
 /// Test a pinned version against a requirement's specifier.
@@ -429,10 +474,10 @@ fn check_version(name: String, specifier: &str, found: &str) -> DependencyStatus
     }
 }
 
-/// Extract a `(normalized name, version specifier)` from a PEP 508 requirement.
-/// Returns `None` for direct-reference (`name @ url`) or unparseable entries.
-/// Environment markers (`; python_version …`) and extras (`[extra]`) are dropped.
-fn parse_requirement(requirement: &str) -> Option<(String, String)> {
+/// Extract a requirement's normalized name, extras group and version specifier
+/// from a PEP 508 string. Returns `None` for direct-reference (`name @ url`) or
+/// unparseable entries. Environment markers (`; python_version …`) are dropped.
+fn parse_requirement(requirement: &str) -> Option<(String, Vec<String>, String)> {
     // Drop any environment marker.
     let base = requirement.split(';').next().unwrap_or("").trim();
     if base.is_empty() {
@@ -451,38 +496,50 @@ fn parse_requirement(requirement: &str) -> Option<(String, String)> {
         return None;
     }
     let rest = base[name_end..].trim();
-    // Drop an optional extras group (`[extra1,extra2]`) before the specifier.
-    let specifier = if let Some(after_open) = rest.strip_prefix('[') {
+    // Split off an optional extras group (`[extra1,extra2]`) before the specifier.
+    let (extras, specifier) = if let Some(after_open) = rest.strip_prefix('[') {
         match after_open.find(']') {
-            Some(close) => after_open[close + 1..].to_string(),
+            Some(close) => {
+                let extras = after_open[..close]
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|e| !e.is_empty())
+                    .map(str::to_string)
+                    .collect();
+                (extras, after_open[close + 1..].to_string())
+            }
             None => return None,
         }
     } else {
-        rest.to_string()
+        (Vec::new(), rest.to_string())
     };
     // Conda version specs carry no internal whitespace.
     let specifier: String = specifier.split_whitespace().collect();
-    Some((normalize_name(name), specifier))
+    Some((normalize_name(name), extras, specifier))
 }
 
 /// Convert a project's PEP 508 `[project.dependencies]` into conda match-specs
 /// suitable for a trial solve. Each requirement's name is mapped PyPI→conda via
-/// the [name map](crate::name_map) (so `opencv-python` becomes `opencv`), and
-/// its version specifier is reused (conda and PEP 440 share the common
-/// comparison operators). Direct-URL / unparseable entries are skipped.
-pub fn requirements_to_conda_specs(dependencies: &[String]) -> Vec<String> {
+/// the [name map](crate::name_map) (so `opencv-python` becomes `opencv`), with
+/// `overrides` consulted first; its version specifier is reused (conda and PEP
+/// 440 share the common comparison operators). A requirement whose extras group
+/// maps to several conda packages yields one spec per package, each carrying
+/// the requirement's specifier. Direct-URL / unparseable entries are skipped.
+pub fn requirements_to_conda_specs(
+    dependencies: &[String],
+    overrides: &name_map::Overrides,
+) -> Vec<String> {
     let mut specs = Vec::new();
     for requirement in dependencies {
-        let Some((name, specifier)) = parse_requirement(requirement) else {
+        let Some((name, extras, specifier)) = parse_requirement(requirement) else {
             continue;
         };
-        let conda = name_map::pypi_to_conda(&name)
-            .map(str::to_string)
-            .unwrap_or(name);
-        if specifier.is_empty() {
-            specs.push(conda);
-        } else {
-            specs.push(format!("{conda} {specifier}"));
+        for conda in overrides.conda_names(&name, &extras) {
+            if specifier.is_empty() {
+                specs.push(conda);
+            } else {
+                specs.push(format!("{conda} {specifier}"));
+            }
         }
     }
     specs
@@ -512,6 +569,12 @@ environment = "myenv"
 registry = "file:///srv/nepenthe"
 version = "1.3.0"
 python = "3.11"
+
+[tool.nepenthe.package-mappings]
+example-package = "example-conda-package"
+
+[tool.nepenthe.extras-mappings]
+"example-package[extra]" = ["example-package", "example-package-extra"]
 "#;
         let dir = std::env::temp_dir().join(format!("nepenthe-proj-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -527,6 +590,18 @@ python = "3.11"
         assert!(matches!(project.nepenthe.label(), Label::Exact(v) if v == "1.3.0"));
         assert_eq!(project.dependencies, vec!["numpy>=2", "requests"]);
 
+        let overrides = project.nepenthe.name_overrides();
+        assert_eq!(
+            overrides.conda_name("example-package"),
+            "example-conda-package"
+        );
+        assert_eq!(
+            overrides.conda_names("example-package", &["extra".to_string()]),
+            vec!["example-package", "example-package-extra"]
+        );
+        // `try` reads the same overrides without requiring the stanza to resolve.
+        assert_eq!(read_name_overrides(&path).unwrap(), overrides);
+
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -541,26 +616,38 @@ python = "3.11"
     }
 
     #[test]
-    fn parse_requirement_extracts_name_and_specifier() {
+    fn parse_requirement_extracts_name_extras_and_specifier() {
         assert_eq!(
             parse_requirement("numpy>=2.2"),
-            Some(("numpy".to_string(), ">=2.2".to_string()))
+            Some(("numpy".to_string(), vec![], ">=2.2".to_string()))
         );
         assert_eq!(
             parse_requirement("requests"),
-            Some(("requests".to_string(), String::new()))
+            Some(("requests".to_string(), vec![], String::new()))
         );
         assert_eq!(
             parse_requirement("Flask-SQLAlchemy >= 3, <4"),
-            Some(("flask-sqlalchemy".to_string(), ">=3,<4".to_string()))
+            Some(("flask-sqlalchemy".to_string(), vec![], ">=3,<4".to_string()))
         );
         assert_eq!(
             parse_requirement("ruff[extra]==0.6.0"),
-            Some(("ruff".to_string(), "==0.6.0".to_string()))
+            Some((
+                "ruff".to_string(),
+                vec!["extra".to_string()],
+                "==0.6.0".to_string()
+            ))
+        );
+        assert_eq!(
+            parse_requirement("ruff[one, two]"),
+            Some((
+                "ruff".to_string(),
+                vec!["one".to_string(), "two".to_string()],
+                String::new()
+            ))
         );
         assert_eq!(
             parse_requirement("pandas==1.5.0; python_version < '3.12'"),
-            Some(("pandas".to_string(), "==1.5.0".to_string()))
+            Some(("pandas".to_string(), vec![], "==1.5.0".to_string()))
         );
         // Direct URL references are skipped.
         assert_eq!(parse_requirement("foo @ https://example.com/foo.whl"), None);
@@ -576,7 +663,7 @@ python = "3.11"
             "scipy>=1.10".to_string(),         // missing
             "foo @ https://x/foo".to_string(), // skipped
         ];
-        let report = check_dependencies(&deps, &packages);
+        let report = check_dependencies(&deps, &packages, &name_map::Overrides::default());
         assert_eq!(report.satisfied(), 2);
         assert_eq!(report.conflicts(), 1);
         assert_eq!(report.missing(), 1);
@@ -597,7 +684,11 @@ python = "3.11"
     fn check_matches_pypi_names_to_conda_packages() {
         // PEP 503 normalization lets `Ruamel.YAML` match a conda `ruamel-yaml`.
         let packages = vec![pkg("ruamel-yaml", "0.18.6")];
-        let report = check_dependencies(&["Ruamel.YAML>=0.18".to_string()], &packages);
+        let report = check_dependencies(
+            &["Ruamel.YAML>=0.18".to_string()],
+            &packages,
+            &name_map::Overrides::default(),
+        );
         assert_eq!(report.satisfied(), 1);
     }
 
@@ -606,9 +697,54 @@ python = "3.11"
         // The PyPI name `opencv-python` maps to the conda package `opencv` via
         // the vendored grayskull table; without it this would report missing.
         let packages = vec![pkg("opencv", "4.10.0")];
-        let report = check_dependencies(&["opencv-python>=4".to_string()], &packages);
+        let report = check_dependencies(
+            &["opencv-python>=4".to_string()],
+            &packages,
+            &name_map::Overrides::default(),
+        );
         assert_eq!(report.satisfied(), 1, "{:?}", report.dependencies);
         assert_eq!(report.missing(), 0);
+    }
+
+    #[test]
+    fn check_expands_an_extras_group_and_requires_every_package() {
+        let overrides = name_map::Overrides::new(
+            [],
+            [(
+                "example-package[extra]".to_string(),
+                vec![
+                    "example-package".to_string(),
+                    "example-package-extra".to_string(),
+                ],
+            )],
+        );
+        let deps = vec!["example-package[extra]>=1.2".to_string()];
+
+        let packages = vec![
+            pkg("example-package", "1.3.0"),
+            pkg("example-package-extra", "1.3.0"),
+        ];
+        let report = check_dependencies(&deps, &packages, &overrides);
+        assert_eq!(report.satisfied(), 1, "{:?}", report.dependencies);
+
+        // The base package alone no longer satisfies the requirement.
+        let packages = vec![pkg("example-package", "1.3.0")];
+        let report = check_dependencies(&deps, &packages, &overrides);
+        assert!(matches!(
+            &report.dependencies[0].status,
+            DependencyStatus::Missing { name } if name == "example-package-extra"
+        ));
+    }
+
+    #[test]
+    fn check_prefers_a_package_override_over_the_vendored_table() {
+        let overrides = name_map::Overrides::new(
+            [("opencv-python".to_string(), "example-opencv".to_string())],
+            [],
+        );
+        let packages = vec![pkg("example-opencv", "4.10.0")];
+        let report = check_dependencies(&["opencv-python>=4".to_string()], &packages, &overrides);
+        assert_eq!(report.satisfied(), 1, "{:?}", report.dependencies);
     }
 
     #[test]
@@ -619,7 +755,7 @@ python = "3.11"
             "opencv-python<5".to_string(),                   // pypi→conda mapped
             "torch @ https://example.com/torch".to_string(), // url ref → skipped
         ];
-        let specs = requirements_to_conda_specs(&deps);
+        let specs = requirements_to_conda_specs(&deps, &name_map::Overrides::default());
         assert_eq!(
             specs,
             vec![

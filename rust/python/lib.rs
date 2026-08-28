@@ -604,7 +604,8 @@ fn try_solve<'py>(
     let mut specs = with_.unwrap_or_default();
     if let Some(path) = &project {
         let deps = project::read_dependencies(path).map_err(err)?;
-        specs.extend(project::requirements_to_conda_specs(&deps));
+        let overrides = project::read_name_overrides(path).map_err(err)?;
+        specs.extend(project::requirements_to_conda_specs(&deps, &overrides));
     }
     if specs.is_empty() {
         return Err(PyValueError::new_err(
