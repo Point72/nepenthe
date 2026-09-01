@@ -45,7 +45,7 @@ jobs:
           version: "3.11"
 
       - name: Setup Rust
-        uses: actions-ext/rust/setup@2db8e3e4c56beb7320c7d730bd2c2d6a6447bf6b
+        uses: actions-ext/rust/setup@0f0b7c9ab3cdb6e9a1f79e2147974d6762ddafea
 
       # `make develop` compiles these from source otherwise, ~10 minutes a run.
       # These are the prebuilt binaries; the Makefile skips its own install when
