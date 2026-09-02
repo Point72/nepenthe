@@ -42,7 +42,7 @@ checks: check
 
 .PHONY: test tests test-ci tests-ci
 test:  ## run the tests
-	cargo llvm-cov nextest --cobertura --output-path  junit.xml
+	cargo nextest run
 
 # alias
 tests: test

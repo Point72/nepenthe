@@ -17,4 +17,6 @@ tokio = { version = "1.52.3", features = ["rt-multi-thread"] }
 
 [profile.release]
 panic = 'abort'
-lto = true
+# Thin LTO keeps most of the optimization but links in parallel; fat LTO over
+# the rattler dependency tree dominated every wheel build.
+lto = "thin"
