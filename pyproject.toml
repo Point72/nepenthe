@@ -65,6 +65,10 @@ current_version = "0.1.1"
 commit = true
 tag = true
 commit_args = "-s"
+pre_commit_hooks = [
+    "cargo update --workspace",
+    "git add Cargo.lock",
+]
 
 [[tool.bumpversion.files]]
 filename = "pyproject.toml"
@@ -94,6 +98,10 @@ rustup target add aarch64-unknown-linux-gnu
 rustup target add x86_64-unknown-linux-gnu
 rustup show
 """
+# A host `make develop` leaves a built extension in the source tree, which the
+# container would otherwise package instead of its own. The template also runs
+# `cargo clean` here, which would wipe the cached target dir below.
+before-build = "rm -f {package}/nepenthe/*.so"
 # cibuildwheel mounts the host filesystem at /host, so pointing cargo there keeps
 # the wheel build's state outside the container, where the workflow can cache it.
 # The in-container build is the one compile in CI that Swatinem/rust-cache cannot
@@ -122,6 +130,7 @@ archs = "arm64"
 [tool.cibuildwheel.windows]
 environment = {PATH="$UserProfile\\.cargo\bin;$PATH", CARGO_TERM_COLOR="always"}
 skip = "*win32 *arm_64"
+
 
 [tool.coverage.run]
 branch = true

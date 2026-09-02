@@ -1,8 +1,9 @@
 # Changes here will be overwritten by Copier
-_commit: 84508d6
+_commit: be75208
 _src_path: https://github.com/python-project-templates/base.git
 add_docs: false
 add_extension: rust
+add_pyodide: false
 add_wiki: true
 email: OpenSource@Point72.com
 github: Point72
