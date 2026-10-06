@@ -1,12 +1,12 @@
 # Channels & Artifactory
 
 Channels are where **packages** come from. In a manifest you reference channels
-by **name**; nepenthe resolves those names to **URLs** at solve time. Nothing is
-hardcoded — the same manifest can solve against public conda servers or an
+by name; nepenthe resolves those names to URLs at solve time. Nothing is
+hardcoded, so the same manifest can solve against public conda servers or an
 internal mirror by changing only how names resolve.
 
-This is the mechanism that replaces hardcoded package servers: you point
-channels at your own Artifactory (or any server) without editing dependencies.
+Set channel resolution to use your Artifactory or another server without
+changing dependencies.
 
 ## Two knobs
 
@@ -109,16 +109,16 @@ channels:
 
 ## Authentication
 
-A channel can require credentials (e.g. a private Artifactory repository).
-Credentials are **never** part of the channel definition, a manifest, or a
-lock — they live in an out-of-band auth store, keyed by host, and are applied as
-an `Authorization` header at request time. Package URLs in the resulting lock
-stay bare.
+A channel can require credentials, for example a private Artifactory repository.
+Credentials are never part of the channel definition, a manifest, or a lock.
+They live in an out-of-band auth store, keyed by host, and are applied as an
+`Authorization` header at request time. Package URLs in the resulting lock stay
+bare.
 
 ### Add the private channel to one environment
 
-Put the private channel on just the environment that needs it (not the project
-channels), so other environments don't require its credentials:
+Put the private channel on just the environment that needs it, rather than the
+project channels, so other environments don't require its credentials:
 
 ```yaml
 environments:
@@ -147,13 +147,13 @@ Either is a JSON map of **host → credential**:
 `BearerToken` (`{ "BearerToken": "<token>" }`) and `CondaToken` are also
 supported. The host key is the bare hostname (no scheme, no path). With the
 credential in place, a private channel solves and installs exactly like a public
-one — and the token never appears in the lock.
+one, and the token never appears in the lock.
 
 ### CI: credentials from an environment variable
 
-Some environments (e.g. GitHub Actions) can inject secrets as environment
-variables but cannot write files. Set `NEPENTHE_CHANNEL_AUTH` to the **same
-JSON** a credentials file would hold — a map of host → credential:
+Some environments, GitHub Actions among them, can inject secrets as environment
+variables but cannot write files. Set `NEPENTHE_CHANNEL_AUTH` to the same JSON a
+credentials file would hold, a map of host to credential:
 
 ```yaml
 # GitHub Actions
@@ -166,8 +166,8 @@ JSON** a credentials file would hold — a map of host → credential:
 
 `NEPENTHE_CHANNEL_AUTH` is layered on top of the file/keyring sources at highest
 priority, so it wins for any host it defines. An unset secret expands to an empty
-string, which is ignored (requests for public channels still go out
-unauthenticated). As with the file, the token is applied as a request header and
+string, which is ignored, and requests for public channels still go out
+unauthenticated. As with the file, the token is applied as a request header and
 never lands in the lock.
 
 > This is **channel** (package) authentication. Credentials for the **registry**

@@ -44,9 +44,9 @@ relative to a local directory, so they are rejected for a remote manifest.
 
 ## Authentication
 
-Credentials live in an `AuthStore`, keyed by host — **never** in a manifest,
-override, or lock. They are applied when a backend is constructed and sent as a
-bearer token or HTTP basic auth header (never embedded in a URL).
+Credentials live in an `AuthStore`, keyed by host, never in a manifest, override,
+or lock. They are applied when a backend is constructed and sent as a bearer
+token or HTTP basic auth header, never embedded in a URL.
 
 ```rust
 use nepenthe_core::backend::{AuthStore, Credential, SpecStore};
@@ -64,11 +64,11 @@ metadata). Set `AWS_ENDPOINT_URL` to target an S3-compatible store.
 
 ## Security guarantees
 
-nepenthe is careful never to leak secrets:
+nepenthe avoids leaking secrets on every path:
 
 - **Redacted logging** — `mask_url` replaces any userinfo in a URL with `***`
   before it reaches a log or error, with a string-surgery fallback for URLs that
-  don't fully parse (so a malformed URL can't leak a password).
+  don't fully parse, so a malformed URL can't leak a password.
 - **Redacted debug** — credential types never print their secret material.
 - **No cleartext credentials** — a `http://` URL with configured credentials is
   refused; use `https://`.
@@ -77,16 +77,16 @@ nepenthe is careful never to leak secrets:
 
 ## HTTP error mapping
 
-The HTTP backend maps notable statuses to descriptive errors (with the URL
-masked): `404 → NotFound`, `401`/`403 → PermissionDenied`. Query strings are
+The HTTP backend maps notable statuses to descriptive errors, with the URL
+masked: `404 → NotFound`, `401`/`403 → PermissionDenied`. Query strings are
 preserved, so signed or versioned URLs work.
 
 ## Bring-your-own backend (Python fsspec)
 
 When a backend exists only as a Python
-[`fsspec.AbstractFileSystem`](https://filesystem-spec.readthedocs.io/) (a bespoke
-or third-party store), two low-level helpers read and write spec bytes through
-it by adapting the object to the Rust `FileSystem` trait:
+[`fsspec.AbstractFileSystem`](https://filesystem-spec.readthedocs.io/) — a
+bespoke or third-party store — two low-level helpers read and write spec bytes
+through it by adapting the object to the Rust `FileSystem` trait:
 
 ```python
 import fsspec
@@ -98,7 +98,7 @@ data = nepenthe.fsspec_pull(fs, "/specs/app.lock")
 ```
 
 These helpers move a whole spec file at a time (`fsspec_publish` writes all the
-bytes, `fsspec_pull` reads them back). They are deliberately low-level: the
+bytes, `fsspec_pull` reads them back). They are low-level on purpose: the
 high-level commands (`build`, `create`, `sync`) address backends by URL
 (`file://`, `s3://`, `https://`) and do not accept an fsspec object. Reach for
 the helpers when you need to stage a manifest or lock through a store that has
@@ -106,6 +106,6 @@ no native URL backend.
 
 ## Registries are built on backends
 
-A [registry](Registry) is just a `SpecStore` plus a root URL — point it at a
-`file://` directory, an `s3://` bucket, or an `https://` Artifactory repo and the
-versioned index and lock objects live there.
+A [registry](Registry) is a `SpecStore` plus a root URL. Point it at a `file://`
+directory, an `s3://` bucket, or an `https://` Artifactory repo and the versioned
+index and lock objects live there.

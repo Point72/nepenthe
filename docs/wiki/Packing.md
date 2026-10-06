@@ -1,6 +1,6 @@
 # Packing for Air-Gapped Hosts
 
-Some machines can't reach your conda channels — isolated build hosts, secure
+Some machines can't reach your conda channels: isolated build hosts, secure
 enclaves, offline labs. **Packing** bundles everything an environment needs into
 one file you can copy across the gap and install with no network and no conda.
 
@@ -18,8 +18,8 @@ left uncompressed.
 
 ## Pack (on a connected host)
 
-`pack` reads a lock, downloads every package it pins, **verifies each against the
-lock's recorded sha256**, and writes the bundle:
+`pack` reads a lock, downloads every package it pins, verifies each against the
+lock's recorded sha256, and writes the bundle:
 
 ```bash
 # pack every platform the lock covers for the "app" environment
@@ -37,8 +37,8 @@ bundled once.
 ## Unpack (on the air-gapped host)
 
 Copy the `.tar` across, then install from it. `unpack` extracts the bundle,
-rewrites every package URL to the bundle's local copy, and installs into a prefix
-— **offline, no conda**:
+rewrites every package URL to the bundle's local copy, and installs into a
+prefix, offline and without conda:
 
 ```bash
 nepenthe unpack --pack app.tar --prefix ./envs/app
@@ -50,10 +50,10 @@ nepenthe unpack --pack app.tar --prefix ./envs/app \
 ```
 
 By default the bundle is extracted to a temporary directory that is removed after
-the install. Pass `--stage-dir` to keep the extracted packages (e.g. to install
-several prefixes from one bundle without re-extracting).
+the install. Pass `--stage-dir` to keep the extracted packages, for instance to
+install several prefixes from one bundle without re-extracting.
 
-The installed prefix is byte-identical to one created online from the same lock —
+The installed prefix is byte-identical to one created online from the same lock;
 [`diff`](Install#inspect-status-and-diff) against the lock comes back empty.
 
 ## From Python
@@ -81,13 +81,13 @@ See the [Python API](Python-API) for the full surface.
 - **No conda, no re-solve.** `unpack` rewrites each lock record's URL to a
   `file://` path inside the bundle; rattler's installer reads the local archive
   directly (`get_or_fetch_from_path`) and links it into the prefix.
-- **Reproducible.** The bundle carries the exact lock, so the air-gapped install
+- **Reproducible.** The bundle contains the exact lock, so the air-gapped install
   matches the online one package for package.
 
 ## Limitations
 
 - **Authenticated channels.** Package downloads during `pack` are unauthenticated.
-  Packing from a channel that requires credentials is not yet supported — pack
+  Packing from a channel that requires credentials is not yet supported; pack
   from a public or already-permitted mirror. (Tracked for a future release.)
 - **Size.** A bundle contains the full package set, so it is as large as the
-  environment (tens to hundreds of MiB). This is the cost of being self-contained.
+  environment and can be tens to hundreds of MiB.

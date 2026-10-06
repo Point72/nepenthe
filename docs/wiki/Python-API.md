@@ -2,7 +2,7 @@
 
 nepenthe ships a Python extension (built in Rust with [pyo3](https://pyo3.rs))
 that mirrors the [CLI](Install): the same producer `build` and consumer
-lifecycle, callable from Python with **no conda required**.
+lifecycle, callable from Python without conda.
 
 ```python
 import nepenthe
@@ -159,7 +159,7 @@ for release in nepenthe.list_releases("file:///srv/nepenthe"):
 ```
 
 A solver conflict is reported as `satisfiable=False` with a `conflict` message
-— it does not raise.
+rather than raised.
 
 ## Return shapes
 
@@ -198,7 +198,8 @@ nepenthe.fsspec_publish(fs, "specs/app.lock", b"...")
 data = nepenthe.fsspec_pull(fs, "specs/app.lock")
 ```
 
-These move a whole spec file at a time and are not wired into the high-level
-commands (`build`, `create`, `sync`), which address backends by URL. See
+Each helper reads or writes an entire spec file. The high-level commands
+(`build`, `create`, `sync`) address backends by URL and do not use these helpers.
+See
 [Storage Backends](Backends) for the native `file://` / `s3://` / `https://`
 backends.

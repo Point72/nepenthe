@@ -2,21 +2,20 @@
 
 > _Forget your environment sorrows._
 
-**nepenthe** builds, versions, and distributes large shared conda/PyPI
+nepenthe builds, versions, and distributes large shared conda and PyPI
 environments. You describe an environment once in a declarative manifest, solve
-it **once** with [rattler](https://github.com/conda/rattler), freeze the result
-into a portable lockfile, and publish that lock to a versioned registry on any
-storage backend — so every machine installs the exact same environment without
-re-solving.
+it once with [rattler](https://github.com/conda/rattler), freeze the result into
+a portable lockfile, and publish that lock to a versioned registry on any storage
+backend. Every machine then installs the same environment without re-solving.
 
-This wiki is the **user guide**. If you want to know how nepenthe is built
-internally, see the [Architecture](Architecture) page under Contributing.
+This wiki is the user guide. For how nepenthe is built internally, see the
+[Architecture](Architecture) page under Contributing.
 
 ## Quickstart
 
-From a dependency list to a solved environment — a portable **lockfile** and a
-conda-installable **spec file** — with no registry and no conda. Pin only what
-you must:
+From a dependency list to a solved environment: a portable lockfile and a
+conda-installable spec file, with no registry and no conda. Pin only what you
+have to:
 
 ```yaml
 # environment.yaml
@@ -47,17 +46,17 @@ nepenthe export --env app --lock app-py3.11.lock --platform linux-64 -o app.txt
 conda create --name app --file app.txt
 ```
 
-That's the vision: **describe once, solve once, distribute everywhere** — a
-versioned lock for nepenthe consumers and an `@EXPLICIT` spec for conda users,
-from the same solve. Read on for the full producer → consumer lifecycle.
+A single solve produces a versioned lock for nepenthe consumers and an
+`@EXPLICIT` spec for conda users. The rest of this guide covers the
+producer-to-consumer lifecycle.
 
 ## What problem does it solve?
 
 Teams that share a big environment across many repos and machines hit the same
 walls: slow installs from re-solving, drift between machines, environment
 metadata smuggled into filenames, hardcoded package servers, and secrets leaking
-into published specs. nepenthe fixes these by treating an environment as a
-**versioned artifact**:
+into published specs. nepenthe addresses these by treating an environment as a
+versioned artifact:
 
 | You want…                               | nepenthe gives you…                                                                 |
 | --------------------------------------- | ----------------------------------------------------------------------------------- |
@@ -87,22 +86,22 @@ flowchart LR
    set variant constraints without editing the manifest.
 1. **Point channels** at your own servers — see
    [Channels & Artifactory](Channels).
-1. **Solve** once and **export** a lock (the reproducible artifact).
+1. **Solve** once and **export** a lock, the reproducible artifact.
 1. **Publish** the lock to a [registry](Registry) and resolve it later by label
    (`latest`, `latest-but-one`, an exact version, or a semver range).
-1. **Install** from the lock into a prefix with **no conda required** — see
+1. **Install** from the lock into a prefix without conda — see
    [Installing Environments](Install).
 
 ## Status
 
-The full producer → consumer pipeline is implemented: manifest composition,
+The full producer-to-consumer pipeline is implemented: manifest composition,
 override layers, the rattler solve core, lock & compatibility exports, storage
 backends (`file://`, `s3://`, `https://`), the versioned registry, the install
 side (install a lock into a prefix without conda, plus `diff` / `status` /
 `remove` / `activate`), and cross-platform support (solve many platforms from
 one host into a single multi-platform lock). The `nepenthe` CLI drives the
-consumer lifecycle. nepenthe can be used as a **Rust library**, via the CLI, or
-from **Python** (a binding that mirrors the CLI). See [Installation](Installation).
+consumer lifecycle. nepenthe can be used as a Rust library, via the CLI, or from
+Python (a binding that mirrors the CLI). See [Installation](Installation).
 
 ## Where next?
 
