@@ -214,6 +214,9 @@ struct CreateArgs {
     /// arbitrary code and make the install non-hermetic).
     #[arg(long)]
     link_scripts: bool,
+    /// Write nepenthe's environment identity activation script (on by default).
+    #[arg(long, default_value = "on", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::Set)]
+    activation_script: bool,
 }
 
 #[derive(Args)]
@@ -474,6 +477,9 @@ struct UnpackArgs {
     /// arbitrary code and make the install non-hermetic).
     #[arg(long)]
     link_scripts: bool,
+    /// Write nepenthe's environment identity activation script (on by default).
+    #[arg(long, default_value = "on", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::Set)]
+    activation_script: bool,
 }
 
 #[derive(Args)]
@@ -485,6 +491,9 @@ struct SyncArgs {
     /// arbitrary code and make the install non-hermetic).
     #[arg(long)]
     link_scripts: bool,
+    /// Write nepenthe's environment identity activation script (on by default).
+    #[arg(long, default_value = "on", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::Set)]
+    activation_script: bool,
 }
 
 #[derive(Args)]
@@ -513,6 +522,9 @@ struct RunArgs {
     /// Run inside an Apptainer/SIF image of the environment instead of a prefix.
     #[arg(long)]
     image: bool,
+    /// Write nepenthe's environment identity activation script (on by default).
+    #[arg(long, default_value = "on", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::Set)]
+    activation_script: bool,
     /// Base OS image for `--image` (must provide glibc + `/bin/sh`).
     #[arg(long)]
     base: Option<String>,
@@ -590,6 +602,9 @@ struct ShellArgs {
     /// Shell to launch (defaults to `$SHELL`, then `bash`).
     #[arg(long)]
     shell: Option<String>,
+    /// Write nepenthe's environment identity activation script (on by default).
+    #[arg(long, default_value = "on", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::Set)]
+    activation_script: bool,
 }
 
 #[derive(Args)]
@@ -682,6 +697,9 @@ struct ImageBuildArgs {
     /// environment's path inside the image.
     #[arg(long)]
     prefix: Option<PathBuf>,
+    /// Write nepenthe's environment identity activation script (on by default).
+    #[arg(long, default_value = "on", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::Set)]
+    activation_script: bool,
 }
 
 #[derive(Subcommand)]
@@ -856,10 +874,16 @@ async fn create(args: CreateArgs) -> CliResult {
             Some(env) => env.clone(),
             None => install::sole_environment(&lock)?,
         };
-        let summary =
-            install::install_lock(&lock, &environment, &platform, &args.prefix, link_scripts)
-                .await?;
-        install::write_hooks_from_lock(
+        let summary = install::install_lock_with_activation_script(
+            &lock,
+            &environment,
+            &platform,
+            &args.prefix,
+            link_scripts,
+            args.activation_script,
+        )
+        .await?;
+        install::write_hooks_from_lock_with_activation_script(
             &bytes,
             &environment,
             &platform,
@@ -867,6 +891,7 @@ async fn create(args: CreateArgs) -> CliResult {
             args.variant.as_deref(),
             None,
             &args.prefix,
+            args.activation_script,
         )?;
         summary
     } else {
@@ -887,7 +912,15 @@ async fn create(args: CreateArgs) -> CliResult {
             coords = coords.with_variant(v.clone());
         }
         let label = Label::parse(&args.label);
-        install::create(&registry, &coords, &label, &args.prefix, link_scripts).await?
+        install::create_with_activation_script(
+            &registry,
+            &coords,
+            &label,
+            &args.prefix,
+            link_scripts,
+            args.activation_script,
+        )
+        .await?
     };
 
     println!(
@@ -1248,13 +1281,14 @@ async fn pack(args: PackArgs) -> CliResult {
 }
 
 async fn unpack(args: UnpackArgs) -> CliResult {
-    let summary = crate::pack::install_pack(
+    let summary = crate::pack::install_pack_with_activation_script(
         &args.pack,
         args.env.as_deref(),
         args.platform.as_deref(),
         &args.prefix,
         args.stage_dir.as_deref(),
         install::LinkScripts::from(args.link_scripts),
+        args.activation_script,
     )
     .await?;
     println!(
@@ -1269,8 +1303,12 @@ async fn unpack(args: UnpackArgs) -> CliResult {
 
 async fn sync(args: SyncArgs) -> CliResult {
     let project = crate::project::read(&args.project)?;
-    let summary =
-        crate::project::sync(&project, install::LinkScripts::from(args.link_scripts)).await?;
+    let summary = crate::project::sync_with_activation_script(
+        &project,
+        install::LinkScripts::from(args.link_scripts),
+        args.activation_script,
+    )
+    .await?;
     println!(
         "synced {} ({}) at {} — {} packages",
         summary.environment,
@@ -1368,7 +1406,8 @@ async fn run_env(args: RunArgs) -> CliResult {
         config.command = args.command;
     }
 
-    let summary = crate::run::run(&config, &[]).await?;
+    let summary =
+        crate::run::run_with_activation_script(&config, &[], args.activation_script).await?;
     if let Some(dest) = args.emit_overlay_lock {
         match &summary.overlay_lock {
             Some(src) => {
@@ -1483,14 +1522,22 @@ async fn shell(args: ShellArgs) -> CliResult {
         None => cache_env_prefix(&coords)?,
     };
     if !prefix.join("conda-meta").is_dir() {
-        install::create(
+        install::create_with_activation_script(
             &registry,
             &coords,
             &label,
             &prefix,
             install::LinkScripts::Skip,
+            args.activation_script,
         )
         .await?;
+    } else {
+        install::ensure_activation_script(
+            &prefix,
+            &coords.environment,
+            &coords.platform,
+            args.activation_script,
+        )?;
     }
 
     let shell_program = args
@@ -1549,7 +1596,7 @@ async fn image_build(args: ImageBuildArgs) -> CliResult {
             crate::image::ImageTarget::Oci { tag }
         }
     };
-    let summary = crate::image::build(
+    let summary = crate::image::build_with_activation_script(
         &registry,
         &coords,
         &label,
@@ -1557,6 +1604,7 @@ async fn image_build(args: ImageBuildArgs) -> CliResult {
         &prefix,
         &target,
         &args.label,
+        args.activation_script,
     )
     .await?;
     eprintln!(
@@ -1799,6 +1847,47 @@ mod tests {
             "file:///srv/nepenthe",
         ]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn activation_script_flag_defaults_on_and_accepts_off() {
+        use clap::Parser;
+
+        fn setting(args: &[&str]) -> bool {
+            match Cli::try_parse_from(args).unwrap().command.unwrap() {
+                Command::Create(args) => args.activation_script,
+                Command::Unpack(args) => args.activation_script,
+                Command::Sync(args) => args.activation_script,
+                Command::Run(args) => args.activation_script,
+                Command::Shell(args) => args.activation_script,
+                Command::Image(ImageCommand::Build(args)) => args.activation_script,
+                _ => panic!("unexpected command"),
+            }
+        }
+
+        let commands = [
+            &[
+                "nepenthe", "create", "--lock", "app.lock", "--prefix", "env",
+            ][..],
+            &["nepenthe", "unpack", "--pack", "app.tar", "--prefix", "env"][..],
+            &["nepenthe", "sync"][..],
+            &["nepenthe", "run"][..],
+            &["nepenthe", "shell", "app", "--registry", "file:///registry"][..],
+            &[
+                "nepenthe",
+                "image",
+                "build",
+                "app",
+                "--registry",
+                "file:///registry",
+            ][..],
+        ];
+        for command in commands {
+            assert!(setting(command), "default should be on: {command:?}");
+            let mut off = command.to_vec();
+            off.extend(["--activation-script", "off"]);
+            assert!(!setting(&off), "off should parse: {off:?}");
+        }
     }
 
     #[test]

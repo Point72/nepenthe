@@ -292,6 +292,27 @@ pub async fn install_pack(
     stage_dir: Option<&Path>,
     link_scripts: LinkScripts,
 ) -> Result<InstallSummary, PackError> {
+    install_pack_with_activation_script(
+        pack_path,
+        environment,
+        platform,
+        prefix,
+        stage_dir,
+        link_scripts,
+        true,
+    )
+    .await
+}
+
+pub async fn install_pack_with_activation_script(
+    pack_path: &Path,
+    environment: Option<&str>,
+    platform: Option<&str>,
+    prefix: &Path,
+    stage_dir: Option<&Path>,
+    link_scripts: LinkScripts,
+    activation_script: bool,
+) -> Result<InstallSummary, PackError> {
     let (staging, created_temp) = match stage_dir {
         Some(dir) => (dir.to_path_buf(), false),
         None => {
@@ -312,6 +333,7 @@ pub async fn install_pack(
         platform,
         prefix,
         link_scripts,
+        activation_script,
     )
     .await;
 
@@ -328,6 +350,7 @@ async fn install_from_staging(
     platform: Option<&str>,
     prefix: &Path,
     link_scripts: LinkScripts,
+    activation_script: bool,
 ) -> Result<InstallSummary, PackError> {
     tar::Archive::new(File::open(pack_path)?).unpack(staging)?;
 
@@ -389,9 +412,27 @@ async fn install_from_staging(
             .map_err(|()| PackError::BadUrl(path.display().to_string()))?;
     }
 
-    install::install_records(records, environment, &platform, prefix, link_scripts)
-        .await
-        .map_err(PackError::from)
+    let summary = install::install_records_with_activation_script(
+        records,
+        environment,
+        &platform,
+        prefix,
+        link_scripts,
+        activation_script,
+    )
+    .await
+    .map_err(PackError::from)?;
+    install::write_hooks_from_lock_with_activation_script(
+        &lock_bytes,
+        environment,
+        &platform,
+        None,
+        None,
+        None,
+        prefix,
+        activation_script,
+    )?;
+    Ok(summary)
 }
 
 /// Download a package archive into memory.
@@ -538,6 +579,66 @@ mod tests {
         let yaml = serde_yaml::to_string(&manifest).unwrap();
         let parsed: PackManifest = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(parsed, manifest);
+    }
+
+    #[tokio::test]
+    async fn unpack_materializes_hooks_from_embedded_manifest() {
+        use crate::solve::{ChannelPriorityMode, SolveOutcome};
+
+        let base = std::env::temp_dir().join(format!("nepenthe-pack-hooks-{}", unique_suffix()));
+        std::fs::create_dir_all(&base).unwrap();
+        let bundle = base.join("app.tar");
+        let prefix = base.join("prefix");
+        let outcome = SolveOutcome {
+            records: Vec::new(),
+            channels: Vec::new(),
+            platform: "linux-64".into(),
+            virtual_packages: Vec::new(),
+            channel_priority: ChannelPriorityMode::Strict,
+            exclude_newer: None,
+        };
+        let lock = crate::export::to_lockfile_string(&outcome, "app").unwrap();
+        let mut lock_doc: serde_yaml::Value = serde_yaml::from_str(&lock).unwrap();
+        lock_doc["environments"]["app"]["packages"]["linux-64"] =
+            serde_yaml::Value::Sequence(Vec::new());
+        let lock = serde_yaml::to_string(&lock_doc).unwrap();
+        let lock = crate::embed::embed_manifest(
+            &lock,
+            "project:\n  name: sample\nactivation:\n  env:\n    PACK_TEST: from-manifest\n  scripts:\n    - echo packed-hook\nenvironments:\n  app: {}\n",
+        )
+        .unwrap();
+        let manifest = PackManifest {
+            format: PACK_FORMAT,
+            environment: "app".into(),
+            platforms: vec!["linux-64".into()],
+            packages: Vec::new(),
+        };
+        let manifest_yaml = serde_yaml::to_string(&manifest).unwrap();
+        {
+            let mut builder = tar::Builder::new(File::create(&bundle).unwrap());
+            append_bytes(&mut builder, LOCK_NAME, lock.as_bytes()).unwrap();
+            append_bytes(&mut builder, MANIFEST_NAME, manifest_yaml.as_bytes()).unwrap();
+            builder.finish().unwrap();
+        }
+
+        install_pack_with_activation_script(
+            &bundle,
+            None,
+            None,
+            &prefix,
+            None,
+            LinkScripts::Skip,
+            true,
+        )
+        .await
+        .unwrap();
+
+        let script =
+            std::fs::read_to_string(prefix.join("etc/conda/activate.d/nepenthe-activate.sh"))
+                .unwrap();
+        assert!(script.contains("export PACK_TEST='from-manifest'"));
+        assert!(script.contains("echo packed-hook"));
+        let _ = std::fs::remove_dir_all(base);
     }
 
     #[test]

@@ -388,10 +388,28 @@ pub struct RunSummary {
     pub status: ExitStatus,
 }
 
+fn resolve_release_label(
+    registry: &Registry,
+    coords: &Coordinates,
+    label: &Label,
+) -> Result<(String, Label), RegistryError> {
+    let version = registry.resolve(coords, label)?.version;
+    let exact_label = Label::parse(&version);
+    Ok((version, exact_label))
+}
+
 /// Materialize `config`'s environment (base + conda overlay) into a prefix and
 /// execute its command with `extra_args` appended. Performs network and file
 /// I/O; await inside a tokio runtime.
 pub async fn run(config: &RunConfig, extra_args: &[String]) -> Result<RunSummary, RunError> {
+    run_with_activation_script(config, extra_args, true).await
+}
+
+pub async fn run_with_activation_script(
+    config: &RunConfig,
+    extra_args: &[String],
+    activation_script: bool,
+) -> Result<RunSummary, RunError> {
     let mut command = config.command.clone();
     command.extend(extra_args.iter().cloned());
     if command.is_empty() {
@@ -403,7 +421,8 @@ pub async fn run(config: &RunConfig, extra_args: &[String]) -> Result<RunSummary
     let registry = Registry::new(SpecStore::new(), config.registry.clone());
     let label = config.label();
 
-    let base_bytes = registry.pull(&coords, &label)?;
+    let (version, exact_label) = resolve_release_label(&registry, &coords, &label)?;
+    let base_bytes = registry.pull(&coords, &exact_label)?;
     let base_lock = install::parse_lock(&base_bytes)?;
     let base_records = install::lock_records(&base_lock, &config.environment, &platform)?;
 
@@ -413,7 +432,7 @@ pub async fn run(config: &RunConfig, extra_args: &[String]) -> Result<RunSummary
     let mut overlay_added = 0usize;
     let mut conda_overlay_lock: Vec<String> = Vec::new();
     if !config.overlay_conda.is_empty() {
-        let (channels, settings) = base_channels(&registry, &coords, &label, &base_bytes);
+        let (channels, settings) = base_channels(&registry, &coords, &exact_label, &base_bytes);
         let constraints: Vec<String> =
             install::lock_packages(&base_lock, &config.environment, &platform)?
                 .iter()
@@ -465,37 +484,51 @@ pub async fn run(config: &RunConfig, extra_args: &[String]) -> Result<RunSummary
             // then let rattler install only the overlay delta on top.
             let base_prefix = default_run_prefix(&base_bytes, &[], &[])?;
             if !base_prefix.join("conda-meta").is_dir() {
-                install::install_records(
+                install::install_records_with_activation_script(
                     base_records.clone(),
                     &config.environment,
                     &platform,
                     &base_prefix,
                     install::LinkScripts::Skip,
+                    activation_script,
                 )
                 .await?;
             }
             if base_prefix != prefix {
                 install::clone_prefix(&base_prefix, &prefix)?;
-                install::install_records(
+                install::install_records_with_activation_script(
                     records,
                     &config.environment,
                     &platform,
                     &prefix,
                     install::LinkScripts::Skip,
+                    activation_script,
                 )
                 .await?;
             }
         } else {
-            install::install_records(
+            install::install_records_with_activation_script(
                 records,
                 &config.environment,
                 &platform,
                 &prefix,
                 install::LinkScripts::Skip,
+                activation_script,
             )
             .await?;
         }
     }
+
+    install::write_hooks_from_lock_with_activation_script(
+        &base_bytes,
+        &config.environment,
+        &platform,
+        config.python.as_deref(),
+        config.variant.as_deref(),
+        Some(&version),
+        &prefix,
+        activation_script,
+    )?;
 
     // Lay the PyPI overlay on top with uv, once per content-keyed prefix. uv
     // resolves the requirements against the interpreter and packages the base
@@ -530,14 +563,7 @@ pub async fn run(config: &RunConfig, extra_args: &[String]) -> Result<RunSummary
             .image_base
             .as_deref()
             .unwrap_or(image::DEFAULT_BASE_IMAGE);
-        let suffix = if config.image_lazy {
-            ".lazy.sif"
-        } else {
-            ".sif"
-        };
-        let mut sif = prefix.clone().into_os_string();
-        sif.push(suffix);
-        let sif = PathBuf::from(sif);
+        let sif = run_image_path(&prefix, config.image_lazy, activation_script);
         if !sif.exists() {
             image::package_sif(
                 &prefix,
@@ -637,6 +663,17 @@ fn default_run_prefix(
     let cache = rattler_cache::default_cache_dir()
         .map_err(|e| RunError::Io(std::io::Error::other(e.to_string())))?;
     Ok(cache.join("nepenthe-run").join(digest))
+}
+
+fn run_image_path(prefix: &Path, lazy: bool, activation_script: bool) -> PathBuf {
+    let suffix = match (lazy, activation_script) {
+        (true, _) => ".lazy.sif",
+        (false, true) => ".sif",
+        (false, false) => ".activation-off.sif",
+    };
+    let mut path = prefix.as_os_str().to_os_string();
+    path.push(suffix);
+    PathBuf::from(path)
 }
 
 /// Overlay PyPI `specs` onto an already-materialized `prefix` with uv. uv
@@ -887,5 +924,74 @@ overlay = { conda = ["polars>=1"], pip = ["rich", "httpx2>=0.27"] }
         assert_ne!(only_pip, both);
         // Deterministic.
         assert_eq!(only_conda, run_digest(base, &["numpy".into()], &[]));
+    }
+
+    #[test]
+    fn run_image_path_separates_eager_activation_modes() {
+        let prefix = Path::new("/cache/nepenthe-run/content-key");
+
+        let eager_on = run_image_path(prefix, false, true);
+        let eager_off = run_image_path(prefix, false, false);
+        let lazy_on = run_image_path(prefix, true, true);
+        let lazy_off = run_image_path(prefix, true, false);
+
+        assert_eq!(
+            eager_on,
+            PathBuf::from("/cache/nepenthe-run/content-key.sif")
+        );
+        assert_eq!(
+            eager_off,
+            PathBuf::from("/cache/nepenthe-run/content-key.activation-off.sif")
+        );
+        assert_ne!(eager_on, eager_off);
+        assert_eq!(
+            lazy_on,
+            PathBuf::from("/cache/nepenthe-run/content-key.lazy.sif")
+        );
+        assert_eq!(lazy_on, lazy_off);
+        assert_ne!(eager_on, lazy_on);
+    }
+
+    #[test]
+    fn run_release_label_stays_exact_when_latest_moves() {
+        let root =
+            std::env::temp_dir().join(format!("nepenthe-run-release-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let registry = Registry::new(SpecStore::new(), format!("file://{}", root.display()));
+        let coords = Coordinates::new("research", "linux-64");
+        let first_manifest = "project:\n  name: sample\nactivation:\n  env:\n    RELEASE_HOOK: first\nenvironments:\n  research: {}\n";
+        registry
+            .publish_with_manifest(
+                &coords,
+                "1.2.3",
+                b"first lock",
+                Some(first_manifest.as_bytes()),
+            )
+            .unwrap();
+
+        let (version, exact_label) = resolve_release_label(&registry, &coords, &Label::Latest)
+            .expect("resolve first release");
+        assert_eq!(version, "1.2.3");
+
+        let second_manifest = "project:\n  name: sample\nactivation:\n  env:\n    RELEASE_HOOK: second\nenvironments:\n  research: {}\n";
+        registry
+            .publish_with_manifest(
+                &coords,
+                "2.0.0",
+                b"second lock",
+                Some(second_manifest.as_bytes()),
+            )
+            .unwrap();
+
+        assert_eq!(registry.pull(&coords, &exact_label).unwrap(), b"first lock");
+        assert_eq!(
+            registry
+                .pull_manifest(&coords, &exact_label)
+                .unwrap()
+                .unwrap(),
+            first_manifest.as_bytes()
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 }
