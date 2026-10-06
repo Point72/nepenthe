@@ -585,60 +585,82 @@ mod tests {
     async fn unpack_materializes_hooks_from_embedded_manifest() {
         use crate::solve::{ChannelPriorityMode, SolveOutcome};
 
-        let base = std::env::temp_dir().join(format!("nepenthe-pack-hooks-{}", unique_suffix()));
-        std::fs::create_dir_all(&base).unwrap();
-        let bundle = base.join("app.tar");
-        let prefix = base.join("prefix");
-        let outcome = SolveOutcome {
-            records: Vec::new(),
-            channels: Vec::new(),
-            platform: "linux-64".into(),
-            virtual_packages: Vec::new(),
-            channel_priority: ChannelPriorityMode::Strict,
-            exclude_newer: None,
-        };
-        let lock = crate::export::to_lockfile_string(&outcome, "app").unwrap();
-        let mut lock_doc: serde_yaml::Value = serde_yaml::from_str(&lock).unwrap();
-        lock_doc["environments"]["app"]["packages"]["linux-64"] =
-            serde_yaml::Value::Sequence(Vec::new());
-        let lock = serde_yaml::to_string(&lock_doc).unwrap();
-        let lock = crate::embed::embed_manifest(
-            &lock,
-            "project:\n  name: sample\nactivation:\n  env:\n    PACK_TEST: from-manifest\n  scripts:\n    - echo packed-hook\nenvironments:\n  app: {}\n",
-        )
-        .unwrap();
-        let manifest = PackManifest {
-            format: PACK_FORMAT,
-            environment: "app".into(),
-            platforms: vec!["linux-64".into()],
-            packages: Vec::new(),
-        };
-        let manifest_yaml = serde_yaml::to_string(&manifest).unwrap();
-        {
-            let mut builder = tar::Builder::new(File::create(&bundle).unwrap());
-            append_bytes(&mut builder, LOCK_NAME, lock.as_bytes()).unwrap();
-            append_bytes(&mut builder, MANIFEST_NAME, manifest_yaml.as_bytes()).unwrap();
-            builder.finish().unwrap();
+        for requested_platform in [
+            None,
+            Some("linux-aarch64"),
+            Some("osx-arm64"),
+            Some("win-64"),
+        ] {
+            let platform = requested_platform
+                .map(str::to_string)
+                .unwrap_or_else(crate::current_platform);
+            let base =
+                std::env::temp_dir().join(format!("nepenthe-pack-hooks-{}", unique_suffix()));
+            std::fs::create_dir_all(&base).unwrap();
+            let bundle = base.join("app.tar");
+            let prefix = base.join("prefix");
+            let outcome = SolveOutcome {
+                records: Vec::new(),
+                channels: Vec::new(),
+                platform: platform.clone(),
+                virtual_packages: Vec::new(),
+                channel_priority: ChannelPriorityMode::Strict,
+                exclude_newer: None,
+            };
+            let lock = crate::export::to_lockfile_string(&outcome, "app").unwrap();
+            let mut lock_doc: serde_yaml::Value = serde_yaml::from_str(&lock).unwrap();
+            lock_doc["environments"]["app"]["packages"][platform.as_str()] =
+                serde_yaml::Value::Sequence(Vec::new());
+            let lock = serde_yaml::to_string(&lock_doc).unwrap();
+            let lock = crate::embed::embed_manifest(
+                &lock,
+                "project:\n  name: sample\nactivation:\n  env:\n    PACK_TEST: from-manifest\n  scripts:\n    - echo packed-hook\nenvironments:\n  app: {}\n",
+            )
+            .unwrap();
+            let manifest = PackManifest {
+                format: PACK_FORMAT,
+                environment: "app".into(),
+                platforms: vec![platform.clone()],
+                packages: Vec::new(),
+            };
+            let manifest_yaml = serde_yaml::to_string(&manifest).unwrap();
+            {
+                let mut builder = tar::Builder::new(File::create(&bundle).unwrap());
+                append_bytes(&mut builder, LOCK_NAME, lock.as_bytes()).unwrap();
+                append_bytes(&mut builder, MANIFEST_NAME, manifest_yaml.as_bytes()).unwrap();
+                builder.finish().unwrap();
+            }
+
+            install_pack_with_activation_script(
+                &bundle,
+                None,
+                requested_platform,
+                &prefix,
+                None,
+                LinkScripts::Skip,
+                true,
+            )
+            .await
+            .unwrap();
+
+            let is_windows = platform == "win-64";
+            let filename = if is_windows {
+                "nepenthe-activate.bat"
+            } else {
+                "nepenthe-activate.sh"
+            };
+            let script =
+                std::fs::read_to_string(prefix.join("etc/conda/activate.d").join(filename))
+                    .unwrap();
+            let expected_env = if is_windows {
+                "set \"PACK_TEST=from-manifest\""
+            } else {
+                "export PACK_TEST='from-manifest'"
+            };
+            assert!(script.contains(expected_env));
+            assert!(script.contains("echo packed-hook"));
+            let _ = std::fs::remove_dir_all(base);
         }
-
-        install_pack_with_activation_script(
-            &bundle,
-            None,
-            None,
-            &prefix,
-            None,
-            LinkScripts::Skip,
-            true,
-        )
-        .await
-        .unwrap();
-
-        let script =
-            std::fs::read_to_string(prefix.join("etc/conda/activate.d/nepenthe-activate.sh"))
-                .unwrap();
-        assert!(script.contains("export PACK_TEST='from-manifest'"));
-        assert!(script.contains("echo packed-hook"));
-        let _ = std::fs::remove_dir_all(base);
     }
 
     #[test]
