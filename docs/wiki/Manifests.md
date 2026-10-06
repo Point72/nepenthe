@@ -240,11 +240,14 @@ See the runnable fixture set in `rust/testdata/e2e/` (`manifest.yaml` imports
 ## Override layers
 
 An **override layer** is a separate YAML file that adjusts a solve without
-editing the manifest. It supplies version pins, variant constraints,
-virtual-package assumptions, and per-python matrix `exclude`/`include` tables:
+editing the manifest. It supplies global conda dependencies, version pins,
+variant constraints, virtual-package assumptions, and per-python matrix
+`exclude`/`include` tables:
 
 ```yaml
 # overrides.yaml
+dependencies: [cmake, ninja]    # added to every environment
+
 pins:
   numpy: ">=2,<2.2"              # bake a version onto a bare dependency
 
@@ -276,6 +279,8 @@ manifest.apply(&overrides);       // variant merge, pin baking, matrix pruning, 
 
 Applying an override:
 
+- **dependencies** are merged into the manifest's base conda dependencies and
+  therefore included in every environment,
 - **merges** each variant's deps/constraints/virtual-packages into the manifest's variant (filling, e.g., an empty `cpu: {}`),
 - **bakes pins** into every matching conda dependency (`numpy` → `numpy >=2,<2.2`), keyed by package name,
 - **records** global virtual packages, and

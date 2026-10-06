@@ -385,6 +385,9 @@ impl Activation {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Overrides {
+    /// Global conda dependencies added to every environment.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependencies: Vec<DepEntry>,
     /// Global virtual-package assumptions for the solve (replaces
     /// `CONDA_OVERRIDE_CUDA` / `CONDA_OVERRIDE_ARCHSPEC`).
     #[serde(
@@ -918,6 +921,8 @@ impl Manifest {
     /// - **variants** \u2014 the override's per-variant deps, constraints, and
     ///   virtual-packages are merged into the manifest's variants (filling,
     ///   e.g., an empty `cpu: {}`).
+    /// - **dependencies** \u2014 global conda dependencies are merged into the
+    ///   manifest's base dependencies.
     /// - **pins** \u2014 baked into every conda dependency list (base, features,
     ///   variants): any spec whose package name is pinned has its version
     ///   replaced with the pin, so the result shows the pinned versions inline.
@@ -936,8 +941,13 @@ impl Manifest {
             }
         }
 
+        extend_dedup(&mut self.dependencies, overrides.dependencies.clone());
+
         if !overrides.pins.is_empty() {
             bake_pins(&mut self.dependencies, &overrides.pins);
+            let mut dependencies = Vec::new();
+            extend_dedup(&mut dependencies, std::mem::take(&mut self.dependencies));
+            self.dependencies = dependencies;
             for feature in self.features.values_mut() {
                 bake_pins(&mut feature.dependencies, &overrides.pins);
             }
@@ -2384,6 +2394,80 @@ environments:
         let out = ov.to_yaml_string().expect("serializes");
         let reparsed = Overrides::from_yaml_str(&out).expect("reparses");
         assert_eq!(ov, reparsed);
+    }
+
+    #[test]
+    fn overrides_global_dependencies_round_trip_and_legacy_yaml_defaults_empty() {
+        let yaml = "dependencies: [numpy, pytest]\n";
+        let overrides = Overrides::from_yaml_str(yaml).expect("parses global dependencies");
+        let serialized = overrides.to_yaml_string().expect("serializes");
+        assert_eq!(
+            Overrides::from_yaml_str(&serialized).expect("reparses"),
+            overrides
+        );
+
+        let legacy = Overrides::from_yaml_str("pins:\n  numpy: '>=2'\n")
+            .expect("legacy overrides without dependencies still parse");
+        assert!(legacy.dependencies.is_empty());
+        assert_eq!(
+            Overrides::from_yaml_str(&legacy.to_yaml_string().expect("serializes legacy"))
+                .expect("reparses legacy"),
+            legacy
+        );
+    }
+
+    #[test]
+    fn apply_merges_global_dependencies_before_pinning_and_resolves_conditionals() {
+        let manifest_yaml = r#"
+project:
+  name: p
+  python: ["3.11", "3.12"]
+dependencies: [numpy]
+environments:
+  app: []
+"#;
+        let overrides_yaml = r#"
+dependencies:
+  - numpy
+  - tool
+  - if: python == "3.11"
+    then: conditional-tool
+  - if: python == "3.12"
+    then: pinned-tool
+pins:
+  numpy: ">=2"
+  pinned-tool: "==1.5"
+"#;
+        let mut manifest = Manifest::from_yaml_str(manifest_yaml).expect("parses manifest");
+        let overrides = Overrides::from_yaml_str(overrides_yaml).expect("parses overrides");
+        manifest.apply(&overrides);
+
+        let py311 = manifest
+            .resolve("app", &Selector::default().with_python("3.11"))
+            .expect("resolves python 3.11");
+        assert!(py311.dependencies.contains(&"numpy >=2".to_string()));
+        assert!(py311.dependencies.contains(&"tool".to_string()));
+        assert!(py311.dependencies.contains(&"conditional-tool".to_string()));
+        assert!(!py311
+            .dependencies
+            .iter()
+            .any(|dep| dep == "pinned-tool ==1.5"));
+
+        let py312 = manifest
+            .resolve("app", &Selector::default().with_python("3.12"))
+            .expect("resolves python 3.12");
+        assert!(py312
+            .dependencies
+            .contains(&"pinned-tool ==1.5".to_string()));
+        let resolved_once = py312.dependencies;
+        let manifest_once = manifest.clone();
+
+        manifest.apply(&overrides);
+        assert_eq!(manifest, manifest_once);
+        let resolved_twice = manifest
+            .resolve("app", &Selector::default().with_python("3.12"))
+            .expect("resolves after repeated apply");
+        assert_eq!(resolved_twice.dependencies, resolved_once);
     }
 
     #[test]
