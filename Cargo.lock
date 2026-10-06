@@ -1991,7 +1991,7 @@ dependencies = [
 
 [[package]]
 name = "nepenthe-core"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "astral-reqwest-middleware",
  "astral-reqwest-retry",
@@ -2026,7 +2026,7 @@ dependencies = [
 
 [[package]]
 name = "nepenthe_py"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "fsspec_rs_bridge",
  "nepenthe-core",

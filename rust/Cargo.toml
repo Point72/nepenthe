@@ -1,6 +1,6 @@
 [package]
 name = "nepenthe-core"
-version = "0.1.2"
+version = "0.2.0"
 authors = ["The nepenthe authors <OpenSource@Point72.com>"]
 edition = "2021"
 license = "Apache-2.0"
