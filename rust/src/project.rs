@@ -260,13 +260,22 @@ pub async fn sync(
     project: &ProjectFile,
     link_scripts: LinkScripts,
 ) -> Result<InstallSummary, ProjectError> {
+    sync_with_activation_script(project, link_scripts, true).await
+}
+
+pub async fn sync_with_activation_script(
+    project: &ProjectFile,
+    link_scripts: LinkScripts,
+    activation_script: bool,
+) -> Result<InstallSummary, ProjectError> {
     let reference = &project.nepenthe;
-    let summary = install::create(
+    let summary = install::create_with_activation_script(
         &reference.registry(),
         &reference.coordinates(),
         &reference.label(),
         &project.resolved_prefix(),
         link_scripts,
+        activation_script,
     )
     .await?;
     Ok(summary)

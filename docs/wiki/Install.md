@@ -113,9 +113,19 @@ nepenthe create --lock app.lock --prefix ./envs/app
 # lock declares more than one); --platform defaults to the current platform.
 ```
 
-If the environment declares [`activation`](Manifests#activation) hooks, `create`
-also materializes them into `etc/conda/activate.d/` (recovered from the manifest
-the lock was solved from), so a subsequent [`activate`](#activate) runs them.
+By default, `create` writes Nepenthe's `nepenthe-activate.sh` or
+`nepenthe-activate.bat` into `etc/conda/activate.d/`. The script exports
+`NEPENTHE_ENVIRONMENT` and `NEPENTHE_PLATFORM`, plus `NEPENTHE_VERSION` for a
+resolved registry release. When the lock's manifest can be recovered, its
+[`activation`](Manifests#activation) environment variables and scripts are also
+included.
+
+`create`, `unpack`, `sync`, `run`, `shell`, and `image build` accept
+`--activation-script on|off` (default `on`). `off` skips Nepenthe's generated
+script and removes a previous Nepenthe-generated script from the prefix.
+Package-provided activation scripts are left untouched.
+Unmarked legacy files at Nepenthe's reserved script paths are preserved;
+enabling generation reports a conflict, while disabling leaves them untouched.
 
 Packages' `post-link` scripts are **not** run: they are arbitrary code shipped
 inside a package and they make an install non-hermetic. Pass `--link-scripts` to

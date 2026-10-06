@@ -370,8 +370,28 @@ pub async fn install_lock(
     prefix: &Path,
     link_scripts: LinkScripts,
 ) -> Result<InstallSummary, InstallError> {
+    install_lock_with_activation_script(lock, environment, platform, prefix, link_scripts, true)
+        .await
+}
+
+pub(crate) async fn install_lock_with_activation_script(
+    lock: &LockFile,
+    environment: &str,
+    platform: &str,
+    prefix: &Path,
+    link_scripts: LinkScripts,
+    activation_script: bool,
+) -> Result<InstallSummary, InstallError> {
     let records = lock_records(lock, environment, platform)?;
-    install_records(records, environment, platform, prefix, link_scripts).await
+    install_records_with_activation_script(
+        records,
+        environment,
+        platform,
+        prefix,
+        link_scripts,
+        activation_script,
+    )
+    .await
 }
 
 /// Render `error` and its `source` chain as `outer: cause: root cause`.
@@ -476,6 +496,25 @@ pub async fn install_records(
     prefix: &Path,
     link_scripts: LinkScripts,
 ) -> Result<InstallSummary, InstallError> {
+    install_records_with_activation_script(
+        records,
+        environment,
+        platform,
+        prefix,
+        link_scripts,
+        true,
+    )
+    .await
+}
+
+pub(crate) async fn install_records_with_activation_script(
+    records: Vec<RepoDataRecord>,
+    environment: &str,
+    platform: &str,
+    prefix: &Path,
+    link_scripts: LinkScripts,
+    activation_script: bool,
+) -> Result<InstallSummary, InstallError> {
     let target = Platform::from_str(platform)
         .map_err(|e| InstallError::Lock(format!("bad platform '{platform}': {e}")))?;
     raise_open_file_limit();
@@ -493,6 +532,15 @@ pub async fn install_records(
         .install(prefix, records)
         .await
         .map_err(|e| InstallError::Install(error_chain(&e)))?;
+
+    set_activation_script(
+        prefix,
+        environment,
+        None,
+        platform,
+        &crate::manifest::Activation::default(),
+        activation_script,
+    )?;
 
     Ok(InstallSummary {
         prefix: prefix.to_path_buf(),
@@ -522,21 +570,52 @@ pub async fn create(
     prefix: &Path,
     link_scripts: LinkScripts,
 ) -> Result<InstallSummary, InstallError> {
-    let bytes = registry.pull(coords, label)?;
+    create_with_activation_script(registry, coords, label, prefix, link_scripts, true).await
+}
+
+pub async fn create_with_activation_script(
+    registry: &Registry,
+    coords: &Coordinates,
+    label: &Label,
+    prefix: &Path,
+    link_scripts: LinkScripts,
+    activation_script: bool,
+) -> Result<InstallSummary, InstallError> {
+    let release = registry.resolve(coords, label)?;
+    let exact_label = Label::parse(&release.version);
+    let bytes = registry.pull(coords, &exact_label)?;
     let lock = parse_lock(&bytes)?;
-    let summary = install_lock(
+    let summary = install_lock_with_activation_script(
         &lock,
         &coords.environment,
         &coords.platform,
         prefix,
         link_scripts,
+        activation_script,
     )
     .await?;
-    // Materialize the environment's activation hooks, recovered from the
-    // manifest the lock was solved from: the embedded comment band if present,
-    // else the registry's manifest sidecar. Best-effort: a release with no
-    // recoverable manifest simply gets no hooks.
-    let manifest_yaml = crate::embed::extract_manifest(&bytes)
+    write_registry_hooks(
+        registry,
+        coords,
+        &exact_label,
+        &release.version,
+        &bytes,
+        prefix,
+        activation_script,
+    )?;
+    Ok(summary)
+}
+
+fn write_registry_hooks(
+    registry: &Registry,
+    coords: &Coordinates,
+    label: &Label,
+    version: &str,
+    lock_bytes: &[u8],
+    prefix: &Path,
+    activation_script: bool,
+) -> Result<(), InstallError> {
+    let manifest_yaml = crate::embed::extract_manifest(lock_bytes)
         .ok()
         .flatten()
         .or_else(|| {
@@ -544,27 +623,29 @@ pub async fn create(
                 .pull_manifest(coords, label)
                 .ok()
                 .flatten()
-                .and_then(|b| String::from_utf8(b).ok())
+                .and_then(|bytes| String::from_utf8(bytes).ok())
         });
-    if let Some(yaml) = manifest_yaml {
-        if let Ok(manifest) = crate::manifest::Manifest::from_yaml_str(&yaml) {
+    let activation = manifest_yaml
+        .and_then(|yaml| crate::manifest::Manifest::from_yaml_str(&yaml).ok())
+        .and_then(|manifest| {
             let selector = crate::manifest::Selector {
                 variant: coords.variant.clone(),
                 python: coords.python.clone(),
             };
-            if let Ok(resolved) = manifest.resolve(&coords.environment, &selector) {
-                let version = registry.resolve(coords, label).ok().map(|r| r.version);
-                write_activation_hooks(
-                    prefix,
-                    &coords.environment,
-                    version.as_deref(),
-                    &coords.platform,
-                    &resolved.activation,
-                )?;
-            }
-        }
-    }
-    Ok(summary)
+            manifest
+                .resolve(&coords.environment, &selector)
+                .ok()
+                .map(|resolved| resolved.activation)
+        })
+        .unwrap_or_default();
+    set_activation_script(
+        prefix,
+        &coords.environment,
+        Some(version),
+        &coords.platform,
+        &activation,
+        activation_script,
+    )
 }
 
 /// The name of the lock's only environment, or an error if it declares none or
@@ -599,30 +680,60 @@ pub fn write_hooks_from_lock(
     version: Option<&str>,
     prefix: &Path,
 ) -> Result<(), InstallError> {
-    let Some(yaml) = crate::embed::extract_manifest(lock_bytes).ok().flatten() else {
-        return Ok(());
-    };
-    let Ok(manifest) = crate::manifest::Manifest::from_yaml_str(&yaml) else {
-        return Ok(());
-    };
-    let selector = crate::manifest::Selector {
-        variant: variant.map(String::from),
-        python: python.map(String::from),
-    };
-    if let Ok(resolved) = manifest.resolve(environment, &selector) {
-        write_activation_hooks(prefix, environment, version, platform, &resolved.activation)?;
-    }
-    Ok(())
+    write_hooks_from_lock_with_activation_script(
+        lock_bytes,
+        environment,
+        platform,
+        python,
+        variant,
+        version,
+        prefix,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn write_hooks_from_lock_with_activation_script(
+    lock_bytes: &[u8],
+    environment: &str,
+    platform: &str,
+    python: Option<&str>,
+    variant: Option<&str>,
+    version: Option<&str>,
+    prefix: &Path,
+    activation_script: bool,
+) -> Result<(), InstallError> {
+    let activation = crate::embed::extract_manifest(lock_bytes)
+        .ok()
+        .flatten()
+        .and_then(|yaml| crate::manifest::Manifest::from_yaml_str(&yaml).ok())
+        .and_then(|manifest| {
+            let selector = crate::manifest::Selector {
+                variant: variant.map(String::from),
+                python: python.map(String::from),
+            };
+            manifest
+                .resolve(environment, &selector)
+                .ok()
+                .map(|resolved| resolved.activation)
+        })
+        .unwrap_or_default();
+    set_activation_script(
+        prefix,
+        environment,
+        version,
+        platform,
+        &activation,
+        activation_script,
+    )
 }
 
 /// Materialize an environment's [activation hooks](crate::manifest::Activation)
 /// into `prefix`'s `etc/conda/activate.d/` so a full activation runs them.
 ///
 /// Writes a single `nepenthe-activate.{sh,bat}` (shell for `platform`) that
-/// exports the hook's env vars and runs its scripts. nepenthe always injects the
-/// environment's identity (`NEPENTHE_ENVIRONMENT`, `NEPENTHE_PLATFORM`, and
-/// `NEPENTHE_VERSION` when known) so hooks can reference it. When the manifest
-/// declares no hooks, nothing is written.
+/// exports the environment's identity and hook env vars, then runs its scripts.
+/// `NEPENTHE_VERSION` is exported when known.
 pub fn write_activation_hooks(
     prefix: &Path,
     environment: &str,
@@ -630,9 +741,6 @@ pub fn write_activation_hooks(
     platform: &str,
     activation: &crate::manifest::Activation,
 ) -> Result<(), InstallError> {
-    if activation.is_empty() {
-        return Ok(());
-    }
     let is_windows = Platform::from_str(platform)
         .map(|p| p.is_windows())
         .unwrap_or(cfg!(windows));
@@ -652,7 +760,7 @@ pub fn write_activation_hooks(
     let dir = prefix.join("etc").join("conda").join("activate.d");
     std::fs::create_dir_all(&dir).map_err(InstallError::Io)?;
     let (file, body) = if is_windows {
-        let mut body = String::from("@echo off\r\n");
+        let mut body = String::from("@echo off\r\n@rem Generated by nepenthe\r\n");
         for (k, v) in &env {
             body.push_str(&format!("set \"{k}={v}\"\r\n"));
         }
@@ -662,7 +770,7 @@ pub fn write_activation_hooks(
         }
         ("nepenthe-activate.bat", body)
     } else {
-        let mut body = String::from("#!/bin/sh\n");
+        let mut body = String::from("#!/bin/sh\n# Generated by nepenthe\n");
         for (k, v) in &env {
             body.push_str(&format!("export {k}={}\n", sh_single_quote(v)));
         }
@@ -672,7 +780,106 @@ pub fn write_activation_hooks(
         }
         ("nepenthe-activate.sh", body)
     };
-    std::fs::write(dir.join(file), body).map_err(InstallError::Io)
+    let path = dir.join(file);
+    match std::fs::read_to_string(&path) {
+        Ok(contents) if !is_generated_activation_script(&contents) => {
+            return Err(InstallError::Activation(format!(
+                "refusing to overwrite unowned activation hook {}",
+                path.display()
+            )));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(InstallError::Io(error)),
+    }
+    std::fs::write(&path, body).map_err(InstallError::Io)?;
+    let other = dir.join(if is_windows {
+        "nepenthe-activate.sh"
+    } else {
+        "nepenthe-activate.bat"
+    });
+    remove_generated_activation_script(&other)
+}
+
+fn set_activation_script(
+    prefix: &Path,
+    environment: &str,
+    version: Option<&str>,
+    platform: &str,
+    activation: &crate::manifest::Activation,
+    enabled: bool,
+) -> Result<(), InstallError> {
+    if enabled {
+        write_activation_hooks(prefix, environment, version, platform, activation)
+    } else {
+        disable_activation_script(prefix)
+    }
+}
+
+pub(crate) fn ensure_activation_script(
+    prefix: &Path,
+    environment: &str,
+    platform: &str,
+    enabled: bool,
+) -> Result<(), InstallError> {
+    if !enabled {
+        return disable_activation_script(prefix);
+    }
+
+    let is_windows = Platform::from_str(platform)
+        .map(|p| p.is_windows())
+        .unwrap_or(cfg!(windows));
+    let dir = prefix.join("etc").join("conda").join("activate.d");
+    let file = if is_windows {
+        "nepenthe-activate.bat"
+    } else {
+        "nepenthe-activate.sh"
+    };
+    let path = dir.join(file);
+    match std::fs::read_to_string(&path) {
+        Ok(contents) if is_generated_activation_script(&contents) => {
+            let other = dir.join(if is_windows {
+                "nepenthe-activate.sh"
+            } else {
+                "nepenthe-activate.bat"
+            });
+            remove_generated_activation_script(&other)
+        }
+        Ok(_) => Err(InstallError::Activation(format!(
+            "refusing to overwrite unowned activation hook {}",
+            path.display()
+        ))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => write_activation_hooks(
+            prefix,
+            environment,
+            None,
+            platform,
+            &crate::manifest::Activation::default(),
+        ),
+        Err(error) => Err(InstallError::Io(error)),
+    }
+}
+
+pub(crate) fn disable_activation_script(prefix: &Path) -> Result<(), InstallError> {
+    let dir = prefix.join("etc").join("conda").join("activate.d");
+    remove_generated_activation_script(&dir.join("nepenthe-activate.sh"))?;
+    remove_generated_activation_script(&dir.join("nepenthe-activate.bat"))
+}
+
+fn remove_generated_activation_script(path: &Path) -> Result<(), InstallError> {
+    match std::fs::read_to_string(path) {
+        Ok(contents) if is_generated_activation_script(&contents) => {
+            std::fs::remove_file(path).map_err(InstallError::Io)
+        }
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(InstallError::Io(error)),
+    }
+}
+
+fn is_generated_activation_script(contents: &str) -> bool {
+    contents.starts_with("#!/bin/sh\n# Generated by nepenthe\n")
+        || contents.starts_with("@echo off\r\n@rem Generated by nepenthe\r\n")
 }
 
 /// Quote a value for safe use in a POSIX `export KEY=<value>` line by wrapping
@@ -1050,13 +1257,303 @@ mod tests {
         assert!(body.contains("export MY_ENV_NAME='team'"));
         assert!(body.contains("echo hi"));
 
-        // An empty activation writes nothing.
+        // An empty activation still writes the environment identity.
         let empty = dir.join("empty");
         std::fs::create_dir_all(&empty).unwrap();
         write_activation_hooks(&empty, "team", None, "linux-64", &Activation::default()).unwrap();
-        assert!(!empty
-            .join("etc/conda/activate.d/nepenthe-activate.sh")
-            .exists());
+        let identity =
+            std::fs::read_to_string(empty.join("etc/conda/activate.d/nepenthe-activate.sh"))
+                .unwrap();
+        assert!(identity.contains("export NEPENTHE_ENVIRONMENT='team'"));
+        assert!(identity.contains("export NEPENTHE_PLATFORM='linux-64'"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_activation_hooks_refuses_to_overwrite_unowned_reserved_name() {
+        let dir =
+            std::env::temp_dir().join(format!("nepenthe-hooks-collision-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (platform, filename, contents) in [
+            (
+                "linux-64",
+                "nepenthe-activate.sh",
+                "#!/bin/sh\nexport NEPENTHE_ENVIRONMENT='package-owned'\n",
+            ),
+            (
+                "win-64",
+                "nepenthe-activate.bat",
+                "@echo off\r\nset \"NEPENTHE_ENVIRONMENT=package-owned\"\r\n",
+            ),
+        ] {
+            let prefix = dir.join(platform);
+            let activation_dir = prefix.join("etc/conda/activate.d");
+            std::fs::create_dir_all(&activation_dir).unwrap();
+            let path = activation_dir.join(filename);
+            std::fs::write(&path, contents).unwrap();
+
+            disable_activation_script(&prefix).unwrap();
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), contents);
+
+            let result = write_activation_hooks(
+                &prefix,
+                "team",
+                None,
+                platform,
+                &crate::manifest::Activation::default(),
+            );
+
+            assert!(matches!(
+                result,
+                Err(InstallError::Activation(message))
+                    if message.contains("unowned activation hook")
+            ));
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), contents);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_activation_hooks_emits_identity_without_manifest_hooks() {
+        let dir = std::env::temp_dir().join(format!("nepenthe-identity-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        write_activation_hooks(
+            &dir,
+            "research",
+            Some("3.11.2"),
+            "linux-64",
+            &crate::manifest::Activation::default(),
+        )
+        .unwrap();
+
+        let script = dir.join("etc/conda/activate.d/nepenthe-activate.sh");
+        let output = std::process::Command::new("sh")
+            .args([
+                "-c",
+                ". \"$1\"; printf '%s|%s|%s' \"$NEPENTHE_ENVIRONMENT\" \"$NEPENTHE_PLATFORM\" \"$NEPENTHE_VERSION\"",
+                "nepenthe-test",
+            ])
+            .arg(&script)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            "research|linux-64|3.11.2"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_activation_hooks_emits_identity_for_windows() {
+        let dir = std::env::temp_dir().join(format!("nepenthe-windows-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        write_activation_hooks(
+            &dir,
+            "research",
+            Some("3.11.2"),
+            "win-64",
+            &crate::manifest::Activation::default(),
+        )
+        .unwrap();
+
+        let script =
+            std::fs::read_to_string(dir.join("etc/conda/activate.d/nepenthe-activate.bat"))
+                .unwrap();
+        assert!(script.contains("set \"NEPENTHE_ENVIRONMENT=research\"\r\n"));
+        assert!(script.contains("set \"NEPENTHE_PLATFORM=win-64\"\r\n"));
+        assert!(script.contains("set \"NEPENTHE_VERSION=3.11.2\"\r\n"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn offline_record_install_writes_identity() {
+        let prefix =
+            std::env::temp_dir().join(format!("nepenthe-offline-records-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&prefix);
+
+        install_records(
+            Vec::new(),
+            "research",
+            "linux-64",
+            &prefix,
+            LinkScripts::Skip,
+        )
+        .await
+        .expect("install empty records offline");
+
+        let script =
+            std::fs::read_to_string(prefix.join("etc/conda/activate.d/nepenthe-activate.sh"))
+                .expect("identity script should be present");
+        assert!(script.contains("export NEPENTHE_ENVIRONMENT='research'"));
+        assert!(script.contains("export NEPENTHE_PLATFORM='linux-64'"));
+        assert!(!script.contains("NEPENTHE_VERSION"));
+
+        let _ = std::fs::remove_dir_all(prefix);
+    }
+
+    #[test]
+    fn registry_release_hooks_stay_pinned_when_latest_moves() {
+        let root =
+            std::env::temp_dir().join(format!("nepenthe-local-registry-{}", std::process::id()));
+        let prefix =
+            std::env::temp_dir().join(format!("nepenthe-registry-env-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&prefix);
+        std::fs::create_dir_all(&root).expect("create local registry");
+        let registry = crate::registry::Registry::new(
+            crate::backend::SpecStore::new(),
+            format!("file://{}", root.display()),
+        );
+        let coords = crate::registry::Coordinates::new("research", "linux-64");
+        let first_manifest = "project:\n  name: sample\nactivation:\n  env:\n    RELEASE_HOOK: first\nenvironments:\n  research: {}\n";
+        let first_lock = crate::embed::embed_manifest("lock release one", first_manifest).unwrap();
+        registry
+            .publish(&coords, "1.2.3", first_lock.as_bytes())
+            .expect("publish first release");
+        let label = crate::registry::Label::parse("latest");
+        let release = registry.resolve(&coords, &label).unwrap();
+        assert_eq!(release.version, "1.2.3");
+        let exact_label = crate::registry::Label::parse(&release.version);
+        let bytes = registry.pull(&coords, &exact_label).unwrap();
+
+        let second_manifest = "project:\n  name: sample\nactivation:\n  env:\n    RELEASE_HOOK: second\nenvironments:\n  research: {}\n";
+        let second_lock =
+            crate::embed::embed_manifest("lock release two", second_manifest).unwrap();
+        registry
+            .publish(&coords, "2.0.0", second_lock.as_bytes())
+            .expect("publish newer release");
+
+        write_registry_hooks(
+            &registry,
+            &coords,
+            &exact_label,
+            &release.version,
+            &bytes,
+            &prefix,
+            true,
+        )
+        .expect("materialize hooks from the resolved release");
+
+        let script =
+            std::fs::read_to_string(prefix.join("etc/conda/activate.d/nepenthe-activate.sh"))
+                .expect("identity script should be present");
+        assert!(script.contains("export NEPENTHE_ENVIRONMENT='research'"));
+        assert!(script.contains("export NEPENTHE_PLATFORM='linux-64'"));
+        assert!(script.contains("export NEPENTHE_VERSION='1.2.3'"));
+        assert!(script.contains("export RELEASE_HOOK='first'"));
+        assert!(!script.contains("RELEASE_HOOK='second'"));
+
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(prefix);
+    }
+
+    #[test]
+    fn cached_activation_script_preserves_hooks_and_recovers_after_off() {
+        let dir = std::env::temp_dir().join(format!("nepenthe-cache-hooks-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let activation_dir = dir.join("etc/conda/activate.d");
+        std::fs::create_dir_all(&activation_dir).unwrap();
+        let package_hook = activation_dir.join("package-hook.sh");
+        std::fs::write(&package_hook, "export PACKAGE_HOOK=present\n").unwrap();
+
+        let mut activation = crate::manifest::Activation::default();
+        activation.env.insert("CUSTOM_VALUE".into(), "kept".into());
+        activation.scripts.push("echo manifest-hook".into());
+        write_activation_hooks(&dir, "research", Some("1.2.3"), "linux-64", &activation).unwrap();
+        let generated = activation_dir.join("nepenthe-activate.sh");
+        let original = std::fs::read_to_string(&generated).unwrap();
+
+        ensure_activation_script(&dir, "research", "linux-64", true).unwrap();
+        assert_eq!(std::fs::read_to_string(&generated).unwrap(), original);
+
+        ensure_activation_script(&dir, "research", "linux-64", false).unwrap();
+        assert!(!generated.exists());
+        assert_eq!(
+            std::fs::read_to_string(&package_hook).unwrap(),
+            "export PACKAGE_HOOK=present\n"
+        );
+
+        ensure_activation_script(&dir, "research", "linux-64", true).unwrap();
+        let restored = std::fs::read_to_string(&generated).unwrap();
+        assert!(restored.contains("export NEPENTHE_ENVIRONMENT='research'"));
+        assert!(restored.contains("export NEPENTHE_PLATFORM='linux-64'"));
+        assert!(!restored.contains("NEPENTHE_VERSION"));
+        assert_eq!(
+            std::fs::read_to_string(&package_hook).unwrap(),
+            "export PACKAGE_HOOK=present\n"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn disabling_activation_script_removes_only_nepenthe_output() {
+        let dir = std::env::temp_dir().join(format!("nepenthe-no-activate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let activation_dir = dir.join("etc/conda/activate.d");
+        std::fs::create_dir_all(&activation_dir).unwrap();
+        let third_party = activation_dir.join("package-hook.sh");
+        std::fs::write(&third_party, "export PACKAGE_HOOK=present\n").unwrap();
+
+        set_activation_script(
+            &dir,
+            "research",
+            None,
+            "linux-64",
+            &crate::manifest::Activation::default(),
+            false,
+        )
+        .unwrap();
+        assert!(!activation_dir.join("nepenthe-activate.sh").exists());
+
+        write_activation_hooks(
+            &dir,
+            "research",
+            None,
+            "linux-64",
+            &crate::manifest::Activation::default(),
+        )
+        .unwrap();
+        set_activation_script(
+            &dir,
+            "research",
+            None,
+            "linux-64",
+            &crate::manifest::Activation::default(),
+            false,
+        )
+        .unwrap();
+        assert!(!activation_dir.join("nepenthe-activate.sh").exists());
+        assert_eq!(
+            std::fs::read_to_string(third_party).unwrap(),
+            "export PACKAGE_HOOK=present\n"
+        );
+
+        let package_owned = activation_dir.join("nepenthe-activate.sh");
+        let package_contents = "#!/bin/sh\n# Generated by nepenthe is not this file's header\n";
+        std::fs::write(&package_owned, package_contents).unwrap();
+        set_activation_script(
+            &dir,
+            "research",
+            None,
+            "linux-64",
+            &crate::manifest::Activation::default(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(package_owned).unwrap(),
+            package_contents
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

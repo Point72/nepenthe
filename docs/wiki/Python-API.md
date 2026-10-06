@@ -47,11 +47,19 @@ list of release dicts, one per platform published).
 
 ## Consumer lifecycle
 
+`create`, `unpack`, and `sync` accept `activation_script` (default `True`). When
+enabled, Nepenthe writes an activation script that exports
+`NEPENTHE_ENVIRONMENT` and `NEPENTHE_PLATFORM`, plus `NEPENTHE_VERSION` when a
+registry release version is resolved. `activation_script=False` removes a
+previous Nepenthe-generated script from the prefix; package-provided activation
+scripts remain untouched.
+
 ```python
 # resolve latest → pull → install into a prefix (no conda)
 summary = nepenthe.create(
     "app", "file:///srv/nepenthe", "./envs/app",
     platform="linux-64", python="3.11", variant="cpu",
+    activation_script=True,
 )
 print(summary["packages"])     # the installed package set
 
@@ -93,7 +101,8 @@ summary = nepenthe.pack("app.lock", "app", "app.tar", platforms=["linux-64"])
 
 # air-gapped host: install offline from the bundle
 nepenthe.unpack("app.tar", "./envs/app")
-nepenthe.unpack("app.tar", "./envs/app", env="app", platform="linux-64")
+nepenthe.unpack("app.tar", "./envs/app", env="app", platform="linux-64",
+                activation_script=False)
 ```
 
 ## Project integration

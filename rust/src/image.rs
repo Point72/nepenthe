@@ -424,9 +424,41 @@ pub async fn build(
     target: &ImageTarget,
     label_text: &str,
 ) -> Result<ImageSummary, ImageError> {
+    build_with_activation_script(
+        registry, coords, label, base, prefix, target, label_text, true,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn build_with_activation_script(
+    registry: &Registry,
+    coords: &Coordinates,
+    label: &Label,
+    base: &str,
+    prefix: &Path,
+    target: &ImageTarget,
+    label_text: &str,
+    activation_script: bool,
+) -> Result<ImageSummary, ImageError> {
     // Materialize the environment (self-contained: every package on disk).
     if !prefix.join("conda-meta").is_dir() {
-        install::create(registry, coords, label, prefix, install::LinkScripts::Skip).await?;
+        install::create_with_activation_script(
+            registry,
+            coords,
+            label,
+            prefix,
+            install::LinkScripts::Skip,
+            activation_script,
+        )
+        .await?;
+    } else {
+        install::ensure_activation_script(
+            prefix,
+            &coords.environment,
+            &coords.platform,
+            activation_script,
+        )?;
     }
 
     let artifact = match target {
