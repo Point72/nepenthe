@@ -17,8 +17,8 @@ A **coordinate** identifies one version sequence:
 Coordinates { environment, platform, python?, variant? }
 ```
 
-Each `(environment, platform, python, variant)` has its **own** semver sequence
-— `myenv` can be on `2.0.0` while `myenv2` is on `0.5.0`.
+Each `(environment, platform, python, variant)` has its own semver sequence, so
+`myenv` can be on `2.0.0` while `myenv2` is on `0.5.0`.
 
 A **label** selects a version within a coordinate:
 
@@ -35,19 +35,17 @@ it's an exact version.
 
 ## Content addressing & immutability
 
-A lock is stored by its **content address** — `sha256-<hex>` of its bytes —
-under `<root>/locks/<address>.lock`, written once. The index records, per
-release, which address a version points at.
-
-This gives strong guarantees:
+A lock is stored by its content address, `sha256-<hex>` of its bytes, under
+`<root>/locks/<address>.lock`, written once. The index records, per release,
+which address a version points to. This provides four properties:
 
 - **Immutable** — republishing a version with identical content is a no-op;
-  republishing with **different** content is rejected.
+  republishing with different content is rejected.
 - **Deduplicated** — two versions with byte-identical locks share one object.
 - **Integrity-checked** — `pull` validates the address format
-  (`sha256-<64 lowercase hex>`) and **recomputes** the hash of the fetched
-  bytes, rejecting tampered or corrupt locks before they reach an installer.
-- **Rollback = repoint** — a label moves; the lock never mutates.
+  (`sha256-<64 lowercase hex>`) and recomputes the hash of the fetched bytes,
+  rejecting tampered or corrupt locks before they reach an installer.
+- **Rollback = repoint** — update the label; the lock remains unchanged.
 
 ## Publishing and resolving
 
@@ -90,9 +88,9 @@ releases:
     created: "2026-06-17T12:00:00Z"
 ```
 
-It is read on `resolve`/`pull` and appended on `publish`. (Concurrent-publish
-safety via compare-and-swap is a planned hardening — today the index assumes a
-single writer.)
+It is read on `resolve`/`pull` and appended on `publish`. Concurrent-publish
+safety via compare-and-swap is planned hardening; today the index assumes a
+single writer.
 
 ## End to end
 
@@ -115,18 +113,18 @@ Installing **from** a pulled lock is covered in
 
 ## Recovering the manifest from a lock
 
-A lock records *what was solved*, but not the manifest it was solved *from* — and
-re-solving (e.g. to test a dependency bump) needs the manifest. nepenthe keeps
-the composed manifest with every build it produces, in **two** ways, so it can be
+A lock records what was solved, but not the manifest it was solved from, and
+re-solving (to test a dependency bump, say) needs the manifest. nepenthe keeps
+the composed manifest with every build it produces, in two ways, so it can be
 recovered from either:
 
 - **Embedded in the lock file.** `nepenthe build --output-dir` prepends the
   manifest to each lock as a compressed comment band (`# nepenthe:manifest+…`).
   It is valid YAML that pixi/rattler ignore, so the file stays a usable
-  `pixi.lock`, and the manifest travels with the bare file — no registry needed.
+  `pixi.lock`, and the manifest travels with the bare file without a registry.
 - **A registry sidecar.** `nepenthe build --registry …` stores the manifest as a
   content-addressed object next to the lock and points the release at it. It is
-  stored **once** and shared by every cell/version that solved the same manifest.
+  stored once and shared by every cell/version that solved the same manifest.
 
 Recover it with `nepenthe manifest`, from either source:
 
@@ -139,7 +137,7 @@ nepenthe manifest --env app --registry file:///srv/nepenthe \
   --python 3.11 --variant cpu -o environment.yaml
 ```
 
-One caveat for the embedded band: a foreign tool that *re-renders* the lock
-(rather than just reading it) drops the comment, since it isn't part of the lock
-structure. For an immutable, nepenthe-published lock this doesn't arise; the
+One caveat for the embedded band: a foreign tool that re-renders the lock, rather
+than just reading it, drops the comment, since it isn't part of the lock
+structure. For an immutable, nepenthe-published lock this doesn't arise, and the
 registry sidecar is unaffected either way.

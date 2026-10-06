@@ -5,11 +5,10 @@ links to a deeper page where relevant.
 
 ## The big picture
 
-nepenthe is **environment-focused**, not repo-focused. Where a tool like pixi
-locks the dependencies _of one repository_, nepenthe builds and distributes
-**shared environments** — curated collections of packages, often the union of
-many teams' needs — that are solved once, versioned, and installed across many
-repos and machines.
+Where a tool like pixi locks the dependencies of one repository, nepenthe builds
+and distributes shared environments: curated collections of packages, often the
+union of many teams' needs, that are solved once, versioned, and installed across
+many repos and machines.
 
 ## Core terms
 
@@ -27,14 +26,15 @@ repos and machines.
 
 ## The build matrix
 
-An environment keeps **one name** and fans out over two axes:
+An environment has one name and can produce targets across two axes:
 
 - **variant** — e.g. `cpu`, `gpu`
 - **python** — e.g. `3.11`, `3.12`, `3.13`
 
 Each `(variant × python)` combination is one **build cell**. A `Selector` picks
 a cell; omitted axes fall back to declared defaults. `Manifest::targets(env)`
-enumerates every cell (minus any pruned by the override `exclude`/`include` tables).
+enumerates every cell, minus any pruned by the override `exclude`/`include`
+tables.
 
 ## Composition
 
@@ -47,18 +47,18 @@ Resolving an environment unions, in order:
 1. the chosen **python** (injected as `python <ver>.*`).
 
 Conda and PyPI dependencies are kept separate throughout. The result is a
-`ResolvedEnvironment` — a single build cell ready to solve.
+`ResolvedEnvironment`, a single build cell ready to solve.
 
 ## Solve once, freeze, never re-solve
 
-The **lock** is the contract. Solving happens once, at publish time, against a
+The lock is the contract. Solving happens once, at publish time, against a
 pinned view of the channels. Installs read the lock and never re-solve, so every
 machine gets a byte-identical environment. Versioning happens at solve time, not
 install time.
 
 ## Immutability & content addressing
 
-A published lock is stored by its **content address** (`sha256-<hex>`), not by
+A published lock is stored by its content address (`sha256-<hex>`) rather than by
 its version. A version label points at a content address. This means:
 
 - the same lock can back several versions (dedup),

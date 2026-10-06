@@ -39,7 +39,7 @@ features:
   ray:
     dependencies: [ray]
   docs:
-    pypi-dependencies: [gendoc]    # pip-only routing is explicit, not name-munging
+    pypi-dependencies: [gendoc]    # pip-only routing is explicit
 
 # environments compose features and fan out over variant × python.
 environments:
@@ -64,9 +64,9 @@ environments:
 
 ### `dependencies` / `pypi-dependencies`
 
-Base dependencies injected into every environment. Conda deps are **match-spec
-strings** (`numpy >=2`); PyPI deps are routed explicitly via
-`pypi-dependencies` rather than name prefixes.
+Base dependencies injected into every environment. Conda deps are match-spec
+strings (`numpy >=2`); PyPI deps are routed through `pypi-dependencies` rather
+than inferred from name prefixes.
 
 > PyPI resolution is not implemented yet. A manifest may declare
 > `pypi-dependencies`, but driving a full solve over an environment that has
@@ -76,7 +76,7 @@ strings** (`numpy >=2`); PyPI deps are routed explicitly via
 
 Any `dependencies` / `pypi-dependencies` list — at the manifest base, on a
 feature, or on a variant — may contain rattler-build-style conditional entries
-alongside plain match-specs. Each is evaluated **per build cell** and its `then`
+alongside plain match-specs. Each is evaluated per build cell and its `then`
 (or `else`) entries are spliced into the list:
 
 ```yaml
@@ -117,9 +117,9 @@ the `cmp(version, spec)` helper for version-aware checks against a conda version
 spec — `cmp(python, ">=3.12")`, `cmp(python, "3.11.*")`. A malformed expression
 fails the solve rather than silently dropping a dependency.
 
-> `platform` is intentionally **not** available: a resolved cell's dependency
-> set is solved for every one of its platforms, so there is no single platform
-> value at resolve time. Use per-environment `platforms` to scope by platform.
+> `platform` is **not** available here: a resolved cell's dependency set is
+> solved for every one of its platforms, so there is no single platform value at
+> resolve time. Use per-environment `platforms` to scope by platform.
 
 ### `features`
 
@@ -128,20 +128,21 @@ their dependencies union into the solve.
 
 ### `variants`
 
-A build flavor (`cpu`, `gpu`, …) an environment selects. A variant carries its
+A build flavor (`cpu`, `gpu`, …) an environment selects. A variant defines its
 own `dependencies`, `pypi-dependencies`, `constraints` (bound the solve without
 adding a dependency), and `virtual-packages` (e.g. `cuda: "12.9"`).
 
 ### `activation`
 
 Activation hooks run when the environment is **activated** (via
-[`activate`](Install#activate) / `conda activate`), not merely placed on `PATH`.
+[`activate`](Install#activate) / `conda activate`), rather than when it is simply
+placed on `PATH`.
 They are materialized into the prefix's `etc/conda/activate.d/` on
 [`create`](Install#create), and may be declared at the manifest base, on a
-feature, and on a variant — they **merge** (env vars: later wins on a key clash;
-scripts: appended in order). This replaces the need for per-environment
-activation packages (e.g. ones that emit telemetry when an environment is
-activated).
+feature, and on a variant. Declarations merge: for env vars, later wins on a key
+clash; scripts are appended in order. These hooks can replace per-environment
+activation packages, such as ones that emit telemetry when an environment is
+activated.
 
 ```yaml
 activation:
@@ -153,7 +154,7 @@ activation:
 
 nepenthe always injects the environment's identity — `NEPENTHE_ENVIRONMENT`,
 `NEPENTHE_PLATFORM`, and `NEPENTHE_VERSION` — before the declared env vars, so
-hooks can reference it. Hooks run only under a **full activation**; `run` / `shell`
+hooks can reference it. Hooks run only under a full activation; `run` / `shell`
 use path activation and do not execute them.
 
 ### `environments`
@@ -183,7 +184,7 @@ environments:
 `extends` inherits the base environment's features; `variant`/`variants`,
 `python`, and `platforms` can be set or overridden per environment. `channels`
 adds channels (by name, resolved like any other) on top of the project channels
-for just this environment — use it for a private channel only one environment
+for just this environment. Use it for a private channel only one environment
 needs, so other environments don't require its credentials. See
 [Channels](Channels#authentication).
 
@@ -212,8 +213,9 @@ let gpu_312 = manifest.resolve("app", &Selector {
 })?;
 ```
 
-A default that isn't a member of its axis (a typo in `default-variant` or
-`default-python`) is rejected rather than silently producing an undeclared cell.
+A default that isn't a member of its axis, such as a typo in `default-variant`
+or `default-python`, is rejected rather than silently producing an undeclared
+cell.
 
 ## Splitting across files: `imports`
 
@@ -230,9 +232,9 @@ environments:
   app: { features: [dev], variants: [cpu, gpu], default-variant: cpu }
 ```
 
-Imports are **sandboxed**: an absolute path or one containing `..` is rejected,
-so a manifest can't read files outside its own tree. Merging carries every
-field — including `virtual-packages` and the `exclude`/`include` matrix tables.
+Imports are sandboxed: an absolute path or one containing `..` is rejected, so a
+manifest can't read files outside its own tree. Merging carries every field,
+including `virtual-packages` and the `exclude`/`include` matrix tables.
 
 See the runnable fixture set in `rust/testdata/e2e/` (`manifest.yaml` imports
 `features.yaml` + `variants.yaml`, plus `overrides.yaml`).

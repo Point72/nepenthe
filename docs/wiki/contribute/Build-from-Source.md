@@ -1,4 +1,6 @@
-`nepenthe` is written in Python and Rust. While prebuilt wheels are provided for end users, it is also straightforward to build `nepenthe` from either the Python [source distribution](https://packaging.python.org/en/latest/specifications/source-distribution-format/) or the GitHub repository.
+`nepenthe` is written in Python and Rust and provides prebuilt wheels for end
+users. To build `nepenthe` from source, use its Python [source distribution](https://packaging.python.org/en/latest/specifications/source-distribution-format/)
+or clone the GitHub repository.
 
 - [Make commands](#make-commands)
 - [Prerequisites](#prerequisites)
@@ -10,7 +12,8 @@
 
 ## Make commands
 
-As a convenience, `nepenthe` uses a `Makefile` for commonly used commands. You can print the main available commands by running `make` with no arguments
+`nepenthe` uses a `Makefile` for commonly used commands. Run `make` with no
+arguments to print the available commands.
 
 ```bash
 > make
@@ -48,11 +51,12 @@ Python build and develop dependencies are specified in the `pyproject.toml`, but
 make requirements
 ```
 
-Note that these dependencies would otherwise be installed normally as part of [PEP517](https://peps.python.org/pep-0517/) / [PEP518](https://peps.python.org/pep-0518/).
+The [PEP517](https://peps.python.org/pep-0517/) / [PEP518](https://peps.python.org/pep-0518/)
+build process also installs these dependencies.
 
 ## Build
 
-Build the python project in the usual manner:
+Build the Python package:
 
 ```bash
 make build
@@ -60,12 +64,12 @@ make build
 
 ## Static standalone binary
 
-The `nepenthe` CLI can be built as a **single, fully static binary** (musl, no
-glibc, no Python required) that runs on any Linux host. Because the dependency
-tree includes C code (`aws-lc-rs`, `zstd`), the build cross-compiles the C with
+The `nepenthe` CLI can be built as a single, fully static binary (musl, no glibc,
+no Python required) that runs on any Linux host. Because the dependency tree
+includes C code (`aws-lc-rs`, `zstd`), the build cross-compiles the C with
 [`zig`](https://ziglang.org/) via
-[`cargo-zigbuild`](https://github.com/rust-cross/cargo-zigbuild) — no separate
-musl C toolchain to install:
+[`cargo-zigbuild`](https://github.com/rust-cross/cargo-zigbuild), so there is no
+separate musl C toolchain to install:
 
 ```bash
 # one-time tooling (zig is pulled in as a dependency)
@@ -90,8 +94,8 @@ ldd target/x86_64-unknown-linux-musl/release/nepenthe
 # => not a dynamic executable
 ```
 
-Because `nepenthe` already uses `rustls` (not OpenSSL) throughout, the static
-build needs no system TLS libraries. Override the target triple with
+Because `nepenthe` already uses `rustls` rather than OpenSSL throughout, the
+static build needs no system TLS libraries. Override the target triple with
 `make dist-static MUSL_TARGET=aarch64-unknown-linux-musl` for other platforms.
 
 ## Lint and Autoformat
@@ -144,7 +148,7 @@ make fix-docs
 
 ## Testing
 
-`nepenthe` has both Python and JavaScript tests. The bulk of the functionality is tested in Python, which can be run via `pytest`. First, install the Python development dependencies with
+`nepenthe` has both Python and Rust tests. The bulk of the functionality is tested in Rust; the Python tests cover the binding and can be run via `pytest`. First, install the Python development dependencies with
 
 ```bash
 make develop

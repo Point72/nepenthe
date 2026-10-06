@@ -1,22 +1,21 @@
 # Consuming an Environment in a Project
 
-A repository that **uses** a shared nepenthe environment declares it in its
-`pyproject.toml`. This is a small **reference** — which environment, which
-version — not the environment definition. From it, nepenthe can install the
+A repository that uses a shared nepenthe environment declares it in its
+`pyproject.toml`. This is a small reference — which environment, which version —
+rather than the environment definition. From it, nepenthe can install the
 environment (`sync`) and check your project's dependencies against it (`check`).
 
 ## Why a reference, not a re-solve
 
-A nepenthe environment is a **pre-solved, versioned, shared artifact**: the
-producer solves it once and publishes a frozen lock, and every consumer installs
-that exact lock. `sync` therefore installs the published environment as-is — it
-does **not** re-resolve the environment together with your project's
-dependencies. That is the whole point: every consumer gets the identical
-environment.
+A nepenthe environment is a pre-solved, versioned, shared artifact: the producer
+solves it once and publishes a frozen lock, and every consumer installs that
+exact lock. `sync` therefore installs the published environment as-is. It does
+not re-resolve the environment together with your project's dependencies, since
+that would give different consumers different environments.
 
-`check` is the seam that keeps the two in sync. It tells you whether what your
-project declares in `[project.dependencies]` is compatible with the environment
-you reference, so you catch drift before it bites.
+`check` keeps the two aligned. It tells you whether what your project declares in
+`[project.dependencies]` is compatible with the environment you reference, so you
+catch drift early.
 
 ## Register the environment
 
@@ -56,10 +55,9 @@ nepenthe sync --project path/to/pyproject.toml
 ```
 
 `sync` resolves the version label against the registry, pulls the lock, and
-installs it into the prefix — no conda required. Re-running `sync` after bumping
-`version` updates the prefix to the new release. This is how you "register" the
-environment: pin it once in `pyproject.toml`, then `sync` in CI or on a new
-machine to get the exact same base every time.
+installs it into the prefix, with no conda required. Running `sync` again after
+bumping `version` updates the prefix. Pin the environment in `pyproject.toml`,
+then run `sync` in CI or on a new machine to install the same base.
 
 ## `check` — verify your dependencies are compatible
 
@@ -78,12 +76,12 @@ entry against the pinned package set:
 
 - **ok** — the environment pins a version satisfying your requirement.
 - **conflict** — the environment pins the package, but at a version your
-  requirement excludes. **`check` exits non-zero**, so it fails CI.
+  requirement excludes. `check` exits non-zero, so it fails CI.
 - **missing** — the environment has no package with that name. This is often
-  fine (a pure-Python dependency you install yourself on top), so it is reported
-  but does **not** fail the command.
-- **skip** — the entry isn't a simple name+version requirement (e.g. a direct
-  URL), so it can't be checked.
+  fine, for instance a pure-Python dependency you install yourself on top, so it
+  is reported but does not fail the command.
+- **skip** — the entry isn't a simple name+version requirement (a direct URL,
+  say), so it can't be checked.
 
 A typical CI step:
 
@@ -110,25 +108,25 @@ See the [Python API](Python-API) for the full surface.
 
 `check` matches names after [PEP 503](https://peps.python.org/pep-0503/)
 normalization (lowercase; `-`, `_`, `.` collapse to `-`) against the
-environment's **conda** package names. When a PyPI name differs from its conda
-counterpart — e.g. `opencv-python` (PyPI) vs `opencv` (conda) — `check` consults
-a bundled PyPI→conda name map (derived from conda-forge's
+environment's conda package names. When a PyPI name differs from its conda
+counterpart, as with `opencv-python` (PyPI) and `opencv` (conda), `check`
+consults a bundled PyPI-to-conda name map (derived from conda-forge's
 [grayskull](https://github.com/conda-forge/conda-forge-bot-data) mapping) so the
-dependency still resolves. Only names absent under **both** spellings report as
-**missing**.
+dependency still resolves. Only names absent under both spellings report as
+missing.
 
-The map is small by design: only the few hundred *divergent* names are vendored
-(the ~12k names that already agree are handled by the direct match). It is
+The map is small by design: only the few hundred divergent names are vendored,
+since the ~12k names that already agree are handled by the direct match. It is
 regenerated from the upstream source with a single command — see
-[Updating the name map](#updating-the-name-map) below. Even so, treat an
-occasional `missing` as "couldn't confirm" rather than "definitely absent" for an
-obscure or very new package.
+[Updating the name map](#updating-the-name-map) below. For an obscure or very new
+package, a `missing` result means the map could not confirm a match; it does not
+prove that no conda package exists.
 
 ### Overriding the name map
 
 The vendored map only knows what conda-forge knows. A project that depends on
-distributions packaged elsewhere — or that packages its own — can say how those
-names translate, without waiting for the vendored table to be regenerated:
+distributions packaged elsewhere, or that packages its own, can say how those
+names translate without waiting for the vendored table to be regenerated:
 
 ```toml
 [tool.nepenthe.package-mappings]
@@ -141,13 +139,13 @@ example-package = "example-conda-package"
 `package-mappings` renames a distribution, taking precedence over the vendored
 entry (or supplying one where there is none).
 
-`extras-mappings` handles a case a rename cannot express. conda has no
-equivalent of a PyPI extras group, so a distribution that splits its optional
-features into separate conda packages maps *one* requirement onto *several*
-packages. `check` then requires every one of them: the requirement is **ok**
-only when all are present and satisfy its version specifier, and reports the
-first that is **missing** or in **conflict**. `nepenthe try` expands the same
-way, adding one conda spec per package.
+`extras-mappings` handles a case a rename cannot express. conda has no equivalent
+of a PyPI extras group, so a distribution that splits its optional features into
+separate conda packages maps one requirement onto several packages. `check` then
+requires every one of them: the requirement is **ok** only when all are present
+and satisfy its version specifier, and it reports the first that is **missing**
+or in **conflict**. `nepenthe try` expands the same way, adding one conda spec
+per package.
 
 Keys are normalized, so casing, separator style and the order of extras in the
 key do not matter. An extras group with no mapping resolves to the distribution
@@ -173,8 +171,8 @@ table diffs cleanly — commit it if it changed.
 ## What's not here yet
 
 - **No joint resolution** with `uv` / `pixi` locks. nepenthe installs the shared
-  base; you manage your project's own dependencies on top (e.g. `uv`/`pip` into
-  the same prefix). `check` keeps the two honest, but nepenthe does not merge or
-  re-solve locks.
+  base; you manage your project's own dependencies on top, for example with
+  `uv`/`pip` into the same prefix. `check` keeps the two honest, but nepenthe
+  does not merge or re-solve locks.
 - **No `pixi.toml` / `uv.lock` import.** The reference lives in
   `[tool.nepenthe]`; other lockfiles are independent.
