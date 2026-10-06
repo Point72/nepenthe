@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -33,9 +33,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - name: ubuntu-latest
+          - name: ubuntu-24.04
             dist_path: dist
-            os: ubuntu-latest
+            os: ubuntu-24.04
             python: "3.11"
             target: native
           - name: ubuntu-24.04-arm
@@ -43,17 +43,16 @@ jobs:
             os: ubuntu-24.04-arm
             python: "3.11"
             target: native
-          - name: macos-latest
+          - name: macos-26
             dist_path: dist
-            os: macos-latest
+            os: macos-26
             python: "3.11"
             target: native
-          - name: windows-latest
+          - name: windows-2025
             dist_path: dist
-            os: windows-latest
+            os: windows-2025
             python: "3.11"
             target: native
-          
 
     steps:
       - name: Checkout
@@ -87,7 +86,7 @@ jobs:
 
       - name: Checks
         run: make checks
-        if: matrix.name == 'ubuntu-latest'
+        if: matrix.name == 'ubuntu-24.04'
 
       # On Linux `make dist-rs` rebuilds this same release profile, and
       # cibuildwheel then rebuilds the tree again from scratch in the manylinux
@@ -100,11 +99,11 @@ jobs:
       # cached ordinary build, so only the platform that uploads it pays for it.
       - name: Test
         run: make coverage
-        if: matrix.name == 'ubuntu-latest'
+        if: matrix.name == 'ubuntu-24.04'
 
       - name: Test
         run: make test
-        if: matrix.target == 'native' && matrix.name != 'ubuntu-latest'
+        if: matrix.target == 'native' && matrix.name != 'ubuntu-24.04'
 
       - name: Build and test Pyodide wheel
         run: make test-pyodide
@@ -121,13 +120,13 @@ jobs:
         uses: EnricoMi/publish-unit-test-result-action@d0a4676d0e0b938bc201470d88276b7c74c712b3  # v2.24.0
         with:
           files: '**/junit.xml'
-        if: matrix.name == 'ubuntu-latest'
+        if: matrix.name == 'ubuntu-24.04'
 
       - name: Upload coverage
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-        if: matrix.name == 'ubuntu-latest'
+        if: matrix.name == 'ubuntu-24.04'
 
       - name: Free disk space
         run: |
@@ -168,7 +167,7 @@ jobs:
         shell: bash
         env:
           CIBW_ARCHS_LINUX: native
-        if: matrix.name == 'ubuntu-latest'
+        if: matrix.name == 'ubuntu-24.04'
 
       - name: Build distributions (Linux ARM64)
         run: |
@@ -204,7 +203,7 @@ jobs:
         uses: actions-ext/python/test-sdist@c8228d827a81b9f8c808825328af361c45461ba3
         with:
           module: nepenthe
-        if: matrix.name == 'ubuntu-latest'
+        if: matrix.name == 'ubuntu-24.04'
 
       - name: Upload distributions
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
