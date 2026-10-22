@@ -1,35 +1,35 @@
 # Concepts
 
-This page defines nepenthe's vocabulary and how the pieces relate. Each term
-links to a deeper page where relevant.
+This page defines nepenthe's terms and how they relate, with links to detailed
+documentation.
 
-## The big picture
+## Shared environments
 
 Where a tool like pixi locks the dependencies of one repository, nepenthe builds
-and distributes shared environments: curated collections of packages, often the
-union of many teams' needs, that are solved once, versioned, and installed across
+and distributes shared environments: collections of packages used by multiple
+teams, solved once, versioned, and installed across
 many repos and machines.
 
 ## Core terms
 
-| Term               | Meaning                                                                                                                                                                                                                                 |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Manifest**       | The declarative YAML description of one or more environments — channels, base dependencies, features, variants, and environments. See [Manifests](Manifests).                                                                           |
-| **Feature**        | A named, composable group of dependencies (e.g. `dev`, `ray`). Environments select features.                                                                                                                                            |
-| **Environment**    | A named composition of features for a set of platforms (e.g. `app = dev + ray`). Fans out over a build matrix.                                                                                                                          |
-| **Variant**        | A build flavor an environment selects (e.g. `cpu` vs `gpu`), carrying its own dependencies, solver constraints, and virtual-package overrides.                                                                                          |
-| **Override layer** | A separate, pullable YAML file that adjusts a solve — version pins, variant constraints, virtual-package assumptions, and matrix `exclude`/`include` tables — without editing the manifest. See [Manifests](Manifests#override-layers). |
-| **Channel**        | Where _packages_ come from. Channel **names** in a manifest resolve to **URLs** via an alias and mirrors, so you can point at any server. See [Channels & Artifactory](Channels).                                                       |
-| **Spec backend**   | Where _specifications_ (manifests, overrides, locks) are read from / written to: `file://`, `s3://`, `https://`. See [Storage Backends](Backends).                                                                                      |
-| **Lock**           | The frozen solve output — a `rattler_lock` lockfile. The primary, reproducible artifact.                                                                                                                                                |
-| **Registry**       | A backend-hosted index mapping a `(environment, platform, python, variant, version)` to a content-addressed lock, enabling versioning and label resolution. See [Registry & Versioning](Registry).                                      |
+| Term               | Meaning                                                                                                                                                                                                           |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Manifest**       | A YAML description of channels, base dependencies, features, variants, and environments. See [Manifests](Manifests).                                                                                              |
+| **Feature**        | A named, composable group of dependencies (e.g. `dev`, `ray`). Environments select features.                                                                                                                      |
+| **Environment**    | A named composition of features for a set of platforms (e.g. `app = dev + ray`), built for each selected variant and Python version.                                                                              |
+| **Variant**        | A build option an environment selects (e.g. `cpu` vs `gpu`), with its own dependencies, solver constraints, and virtual-package overrides.                                                                        |
+| **Override layer** | A separate YAML file that adjusts version pins, variant constraints, virtual-package assumptions, and matrix `exclude`/`include` tables without editing the manifest. See [Manifests](Manifests#override-layers). |
+| **Channel**        | Where _packages_ come from. Channel **names** in a manifest resolve to **URLs** via an alias and mirrors, so you can point at any server. See [Channels & Artifactory](Channels).                                 |
+| **Spec backend**   | Where _specifications_ (manifests, overrides, locks) are read from / written to: `file://`, `s3://`, `https://`. See [Storage Backends](Backends).                                                                |
+| **Lock**           | A `rattler_lock` lockfile recording the solved package set for installation without re-solving.                                                                                                                   |
+| **Registry**       | A backend-hosted index mapping a `(environment, platform, python, variant, version)` to a content-addressed lock, enabling versioning and label resolution. See [Registry & Versioning](Registry).                |
 
 ## The build matrix
 
 An environment has one name and can produce targets across two axes:
 
-- **variant** — e.g. `cpu`, `gpu`
-- **python** — e.g. `3.11`, `3.12`, `3.13`
+- **variant**, e.g. `cpu`, `gpu`
+- **python**, e.g. `3.11`, `3.12`, `3.13`
 
 Each `(variant × python)` combination is one **build cell**. A `Selector` picks
 a cell; omitted axes fall back to declared defaults. `Manifest::targets(env)`
@@ -49,29 +49,29 @@ Resolving an environment unions, in order:
 Conda and PyPI dependencies are kept separate throughout. The result is a
 `ResolvedEnvironment`, a single build cell ready to solve.
 
-## Solve once, freeze, never re-solve
+## Solving and installation
 
-The lock is the contract. Solving happens once, at publish time, against a
-pinned view of the channels. Installs read the lock and never re-solve, so every
-machine gets a byte-identical environment. Versioning happens at solve time, not
-install time.
+The build resolves dependencies and records the selected packages in a lock.
+Installs read that lock without re-solving, so machines use the same package
+versions for each target platform. Versions are assigned when publishing, not
+when installing.
 
 ## Immutability & content addressing
 
 A published lock is stored by its content address (`sha256-<hex>`) rather than by
 its version. A version label points at a content address. This means:
 
-- the same lock can back several versions (dedup),
-- a published version never changes underneath you,
-- rollback is just repointing a label,
-- a pull recomputes the hash and rejects tampered bytes.
+- Several versions can refer to the same lock, avoiding duplicate storage.
+- A published version cannot be changed.
+- Repoint a label to roll back to an earlier release.
+- A pull recomputes the hash and rejects content that does not match.
 
 See [Registry & Versioning](Registry) for the full model.
 
-## Trying it today
+## Rust examples
 
-nepenthe is currently a Rust library. The `rust/examples/` directory has small,
-runnable programs that exercise these concepts end to end:
+The `rust/examples/` directory contains runnable programs for manifest
+composition, registry operations, and channel configuration:
 
 ```bash
 cd rust

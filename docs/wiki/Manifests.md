@@ -1,9 +1,8 @@
 # Manifests
 
-A **manifest** is the declarative YAML description of one or more environments.
-It replaces a folder of `requirements*.txt` files: channels, base dependencies,
-composable features, build variants, and named environments all live in one
-(optionally split) document.
+A **manifest** describes one or more environments in YAML. It defines channels,
+base dependencies, composable features, build variants, and named environments.
+The definition can be split across files.
 
 This page covers the manifest format and how it composes. For terminology, see
 [Concepts](Concepts); for pointing channels at your own servers, see
@@ -53,31 +52,31 @@ environments:
 
 ### `project`
 
-| Key              | Meaning                                                                            |
-| ---------------- | ---------------------------------------------------------------------------------- |
-| `name`           | Project name.                                                                      |
-| `channels`       | Channel **names** in priority order (resolved to URLs — see [Channels](Channels)). |
-| `channel-alias`  | Base URL that bare channel names resolve against (e.g. an internal Artifactory).   |
-| `platforms`      | Target platforms (`linux-64`, `osx-arm64`, `win-64`, …).                           |
-| `python`         | The python axis — each value produces one build target.                            |
-| `default-python` | The python chosen when a selection omits one (must be in `python`).                |
+| Key              | Meaning                                                                          |
+| ---------------- | -------------------------------------------------------------------------------- |
+| `name`           | Project name.                                                                    |
+| `channels`       | Channel names in priority order, resolved to URLs. See [Channels](Channels).     |
+| `channel-alias`  | Base URL that bare channel names resolve against (e.g. an internal Artifactory). |
+| `platforms`      | Target platforms (`linux-64`, `osx-arm64`, `win-64`, …).                         |
+| `python`         | Python versions; each value produces one build target.                           |
+| `default-python` | The python chosen when a selection omits one (must be in `python`).              |
 
 ### `dependencies` / `pypi-dependencies`
 
-Base dependencies injected into every environment. Conda deps are match-spec
-strings (`numpy >=2`); PyPI deps are routed through `pypi-dependencies` rather
+Base dependencies included in every environment. Conda dependencies are match-spec
+strings (`numpy >=2`); PyPI dependencies use `pypi-dependencies` rather
 than inferred from name prefixes.
 
 > PyPI resolution is not implemented yet. A manifest may declare
-> `pypi-dependencies`, but driving a full solve over an environment that has
-> them fails fast rather than silently producing a conda-only lock.
+> `pypi-dependencies`, but solving an environment that includes them fails
+> instead of producing a conda-only lock.
 
 ### Conditional dependencies (`if` / `then` / `else`)
 
-Any `dependencies` / `pypi-dependencies` list — at the manifest base, on a
-feature, or on a variant — may contain rattler-build-style conditional entries
+Any `dependencies` / `pypi-dependencies` list at the manifest base, on a
+feature, or on a variant may contain rattler-build-style conditional entries
 alongside plain match-specs. Each is evaluated per build cell and its `then`
-(or `else`) entries are spliced into the list:
+(or `else`) entries are inserted into the list:
 
 ```yaml
 features:
@@ -92,7 +91,7 @@ features:
 ```
 
 `then` and `else` may each be a single entry or a list, and either may itself
-contain another `if` — nesting under `else` expresses `elseif`:
+contain another `if`. Nest under `else` to express `elseif`:
 
 ```yaml
       - if: python == "3.11"
@@ -114,8 +113,8 @@ two axes:
 Supported operators are minijinja's: `==`, `!=`, `<`, `>`, `and`, `or`, `not`,
 `in`, parentheses. Because bare comparisons are lexical (`"3.9" > "3.13"`), use
 the `cmp(version, spec)` helper for version-aware checks against a conda version
-spec — `cmp(python, ">=3.12")`, `cmp(python, "3.11.*")`. A malformed expression
-fails the solve rather than silently dropping a dependency.
+spec, such as `cmp(python, ">=3.12")` or `cmp(python, "3.11.*")`. A malformed
+expression causes the solve to fail.
 
 > `platform` is **not** available here: a resolved cell's dependency set is
 > solved for every one of its platforms, so there is no single platform value at
@@ -123,21 +122,21 @@ fails the solve rather than silently dropping a dependency.
 
 ### `features`
 
-Named, composable dependency groups. An environment lists the features it wants;
-their dependencies union into the solve.
+Named, composable dependency groups. An environment selects features, and their
+dependencies are combined for the solve.
 
 ### `variants`
 
-A build flavor (`cpu`, `gpu`, …) an environment selects. A variant defines its
+A build option (`cpu`, `gpu`, …) an environment selects. A variant defines its
 own `dependencies`, `pypi-dependencies`, `constraints` (bound the solve without
 adding a dependency), and `virtual-packages` (e.g. `cuda: "12.9"`).
 
 ### `activation`
 
-Activation hooks run when the environment is **activated** (via
-[`activate`](Install#activate) / `conda activate`), rather than when it is simply
-placed on `PATH`.
-They are materialized into the prefix's `etc/conda/activate.d/` on
+Activation hooks run when the environment is activated via
+[`activate`](Install#activate) / `conda activate`. Adding the environment to
+`PATH` does not run them.
+They are written to the prefix's `etc/conda/activate.d/` on
 [`create`](Install#create), and may be declared at the manifest base, on a
 feature, and on a variant. Declarations merge: for env vars, later wins on a key
 clash; scripts are appended in order. These hooks can replace per-environment
@@ -152,9 +151,9 @@ activation:
     - 'echo "activated $NEPENTHE_ENVIRONMENT $NEPENTHE_VERSION"'
 ```
 
-nepenthe always injects the environment's identity — `NEPENTHE_ENVIRONMENT`,
-`NEPENTHE_PLATFORM`, and `NEPENTHE_VERSION` — before the declared env vars, so
-hooks can reference it. Hooks run only under a full activation; `run` / `shell`
+nepenthe sets `NEPENTHE_ENVIRONMENT`, `NEPENTHE_PLATFORM`, and `NEPENTHE_VERSION`
+before the declared environment variables so hooks can reference them.
+Hooks run only under a full activation; `run` / `shell`
 use path activation and do not execute them.
 
 ### `environments`
@@ -190,10 +189,11 @@ needs, so other environments don't require its credentials. See
 
 ## Composition & the build matrix
 
-Resolving a `(variant, python)` cell unions: base deps → selected features
-(incl. inherited) → selected variant, evaluating each list's conditional
-(`if:`) entries for the cell, then adds the chosen python (`python <ver>.*`).
-Conda and PyPI deps stay separate.
+Resolving a `(variant, python)` cell combines base dependencies, selected
+features (including inherited features), and the selected variant, in that
+order. Each list's conditional (`if:`) entries are evaluated for the cell, then
+the chosen Python version is added as `python <ver>.*`.
+Conda and PyPI dependencies remain separate.
 
 ```rust
 use nepenthe_core::manifest::{Manifest, Selector};
@@ -214,8 +214,7 @@ let gpu_312 = manifest.resolve("app", &Selector {
 ```
 
 A default that isn't a member of its axis, such as a typo in `default-variant`
-or `default-python`, is rejected rather than silently producing an undeclared
-cell.
+or `default-python`, is rejected.
 
 ## Splitting across files: `imports`
 
@@ -233,7 +232,7 @@ environments:
 ```
 
 Imports are sandboxed: an absolute path or one containing `..` is rejected, so a
-manifest can't read files outside its own tree. Merging carries every field,
+manifest can't read files outside its own tree. Merging preserves every field,
 including `virtual-packages` and the `exclude`/`include` matrix tables.
 
 See the runnable fixture set in `rust/testdata/e2e/` (`manifest.yaml` imports
@@ -281,17 +280,21 @@ manifest.apply(&overrides);       // variant merge, pin baking, matrix pruning, 
 
 Applying an override:
 
-- **dependencies** are merged into the manifest's base conda dependencies and
-  therefore included in every environment,
-- **merges** each variant's deps/constraints/virtual-packages into the manifest's variant (filling, e.g., an empty `cpu: {}`),
-- **bakes pins** into every matching conda dependency (`numpy` → `numpy >=2,<2.2`), keyed by package name,
-- **records** global virtual packages, and
-- **prunes** the build matrix via the `exclude` denylist and `include` allowlist (a cell is built only if its environment is allowed by `include` for that python — when present — and not named in `exclude`; `exclude` wins on overlap).
+- Adds its dependencies to the manifest's base conda dependencies, making them
+  available in every environment.
+- Merges each variant's dependencies, constraints, and virtual packages into
+  the manifest's variant, including an empty definition such as `cpu: {}`.
+- Applies pins to every matching conda dependency by package name
+  (`numpy` becomes `numpy >=2,<2.2`).
+- Records global virtual packages.
+- Filters the build matrix through `exclude` and `include`. A cell is built
+  only if its environment is allowed by `include` for that Python version
+  (when present) and is not listed in `exclude`. `exclude` takes precedence.
 
 ## Validation lints
 
 `Manifest::lint()` reports common problems before a solve:
 
-- **HardPin** — a `==` pin in base or a feature (locations reported).
-- **TooManyHardPins** — an environment exceeds the hard-pin budget.
-- **BaseFeatureCollision** — a feature redeclares a base package.
+- **HardPin**: a `==` pin in base or a feature (locations reported).
+- **TooManyHardPins**: an environment exceeds the hard-pin budget.
+- **BaseFeatureCollision**: a feature redeclares a base package.

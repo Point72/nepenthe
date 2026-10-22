@@ -1,7 +1,7 @@
 # Comparing & Composing Environments
 
-Two registry-level workflows for working with published environments: comparing
-what changed between releases, and unioning environments into one lock.
+Compare package changes between published releases or combine multiple
+environments into one lock.
 
 ## Diffing two releases
 
@@ -21,7 +21,7 @@ app: 1.2.0 → 1.3.0 (linux-64)
 ~ numpy 2.1.0 -> 2.4.6
 ```
 
-`+` is new in the newer release, `-` was dropped, and `~` changed version. Select
+`+` marks an added package, `-` a removed package, and `~` a version change. Select
 the cell with `--platform`, `--python`, and `--variant` as for
 [`create`](Install#create).
 
@@ -30,9 +30,8 @@ the cell with `--platform`, `--python`, and `--variant` as for
 
 ## Composing published environments
 
-`nepenthe compose` unions two or more published environments into one lock. It
-applies manifest-level feature composition to published artifacts; for example,
-you can combine a shared `base` with a team's `ml-extras`:
+`nepenthe compose` combines packages from two or more published environments
+into one lock. For example, combine a shared `base` with a team's `ml-extras`:
 
 ```bash
 nepenthe compose \
@@ -41,7 +40,7 @@ nepenthe compose \
   --name research --output research.lock
 ```
 
-The result is a normal lock you can publish and install like any other:
+Publish and install the resulting lock:
 
 ```bash
 nepenthe publish research --lock research.lock \
@@ -51,13 +50,13 @@ nepenthe create research --registry file:///srv/nepenthe --python 3.11 --prefix 
 
 ### How it works
 
-- Packages are unioned by name across the inputs, for every platform common to
-  all of them. The first input to provide a package wins.
+- Packages are combined by name across the inputs, for every platform common to
+  all of them. The first input to provide a package takes precedence.
 
 - Channels are unioned in input order.
 
-- If two inputs pin the same package to a different version or build, compose
-  fails with a clear conflict rather than silently picking one:
+- If two inputs pin the same package to different versions or builds, compose
+  reports a conflict and fails:
 
   ```text
   error: cannot compose: 'numpy' is pinned to 2.4.6=py311h0 and 2.2.6=py311h1 on linux-64
@@ -65,8 +64,8 @@ nepenthe create research --registry file:///srv/nepenthe --python 3.11 --prefix 
 
   Resolve it by aligning the inputs' versions (or composing compatible releases).
 
-> Compose unions frozen locks without re-solving. It is exact and fast, but
-> cannot reconcile incompatible pins. To resolve conflicts, rebuild from the
+> Compose combines frozen locks without re-solving and cannot reconcile
+> incompatible pins. To resolve conflicts, rebuild from the
 > requirements with [`build`](Install). Use [`try`](Install) to check whether a
 > set of requirements can be solved together before publishing.
 

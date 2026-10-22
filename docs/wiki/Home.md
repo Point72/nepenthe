@@ -4,18 +4,16 @@
 
 nepenthe builds, versions, and distributes large shared conda and PyPI
 environments. You describe an environment once in a declarative manifest, solve
-it once with [rattler](https://github.com/conda/rattler), freeze the result into
-a portable lockfile, and publish that lock to a versioned registry on any storage
-backend. Every machine then installs the same environment without re-solving.
+it with [rattler](https://github.com/conda/rattler), and publish the resulting
+lockfile to a versioned registry. Other machines install the packages recorded
+in the lock without re-solving.
 
 This wiki is the user guide. For how nepenthe is built internally, see the
 [Architecture](Architecture) page under Contributing.
 
 ## Quickstart
 
-From a dependency list to a solved environment: a portable lockfile and a
-conda-installable spec file, with no registry and no conda. Pin only what you
-have to:
+Create a manifest with the dependencies and version constraints you need:
 
 ```yaml
 # environment.yaml
@@ -46,25 +44,22 @@ nepenthe export --env app --lock app-py3.11.lock --platform linux-64 -o app.txt
 conda create --name app --file app.txt
 ```
 
-A single solve produces a versioned lock for nepenthe consumers and an
-`@EXPLICIT` spec for conda users. The rest of this guide covers the
-producer-to-consumer lifecycle.
+The lock can be published to a registry for nepenthe consumers or exported as
+an `@EXPLICIT` spec for conda users.
 
 ## What problem does it solve?
 
-Teams that share a big environment across many repos and machines hit the same
-walls: slow installs from re-solving, drift between machines, environment
-metadata smuggled into filenames, hardcoded package servers, and secrets leaking
-into published specs. nepenthe addresses these by treating an environment as a
-versioned artifact:
+Sharing an environment across repos and machines requires consistent package
+versions, independent releases, and access to package servers. nepenthe stores
+each environment as a versioned artifact:
 
-| You want…                               | nepenthe gives you…                                                                 |
-| --------------------------------------- | ----------------------------------------------------------------------------------- |
-| The same environment everywhere         | Solve once → a hashed lock installed identically on every machine                   |
-| Independent release cadences            | Per-environment semver versioning (no global stamp, no filename encoding)           |
-| Your own package servers                | Channels resolved to **any** URL (e.g. an internal Artifactory) — nothing hardcoded |
-| Private packages without leaks          | Credentials injected at use time from an auth store; never written into artifacts   |
-| Confidence a release is what you tested | Immutable, content-addressed locks; pulls are integrity-checked                     |
+| Requirement                          | nepenthe behavior                                                                 |
+| ------------------------------------ | --------------------------------------------------------------------------------- |
+| The same package versions everywhere | Installs use the packages recorded in a hashed lock                               |
+| Independent release schedules        | Each environment has its own semver versions                                      |
+| Your own package servers             | Channels resolve to configurable URLs, including Artifactory servers              |
+| Private packages without leaks       | Credentials injected at use time from an auth store; never written into artifacts |
+| Release integrity                    | Immutable, content-addressed locks; pulls are integrity-checked                   |
 
 ## How it fits together
 
@@ -80,39 +75,39 @@ flowchart LR
     P --> I[Install<br/>rattler · no conda]
 ```
 
-1. **Author** a [manifest](Manifests) — features, environments, variants, and the
-   channels to solve against.
-1. **Layer** an [overrides](Manifests#override-layers) file to pin versions or
+1. Write a [manifest](Manifests) with features, environments, variants, and
+   package channels.
+1. Add an [overrides](Manifests#override-layers) file to pin versions or
    set variant constraints without editing the manifest.
-1. **Point channels** at your own servers — see
+1. Configure channels to use your package servers. See
    [Channels & Artifactory](Channels).
-1. **Solve** once and **export** a lock, the reproducible artifact.
-1. **Publish** the lock to a [registry](Registry) and resolve it later by label
+1. Solve the environment and export a lock.
+1. Publish the lock to a [registry](Registry) and resolve it later by label
    (`latest`, `latest-but-one`, an exact version, or a semver range).
-1. **Install** from the lock into a prefix without conda — see
+1. Install from the lock into a prefix without conda. See
    [Installing Environments](Install).
 
 ## Status
 
-The full producer-to-consumer pipeline is implemented: manifest composition,
-override layers, the rattler solve core, lock & compatibility exports, storage
-backends (`file://`, `s3://`, `https://`), the versioned registry, the install
-side (install a lock into a prefix without conda, plus `diff` / `status` /
-`remove` / `activate`), and cross-platform support (solve many platforms from
-one host into a single multi-platform lock). The `nepenthe` CLI drives the
-consumer lifecycle. nepenthe can be used as a Rust library, via the CLI, or from
-Python (a binding that mirrors the CLI). See [Installation](Installation).
+nepenthe supports manifest composition, override layers, solving with rattler,
+lock and compatibility exports, and versioned registries on `file://`, `s3://`,
+and `https://` backends. It can solve multiple platforms from one host into a
+single lock and install packages without conda. The CLI includes `diff`,
+`status`, `remove`, and `activate` commands.
 
-## Where next?
+Use nepenthe as a Rust library, through the CLI, or from Python bindings that
+mirror the CLI. See [Installation](Installation).
 
-- Why does this exist? Read **[Motivation](Motivation)** for the problem & alternatives.
-- New here? Read **[Concepts](Concepts)** for the vocabulary.
-- Authoring an environment? See **[Manifests](Manifests)**.
-- Using internal package servers? See **[Channels & Artifactory](Channels)**.
-- Publishing/consuming versions? See **[Registry & Versioning](Registry)**.
-- Installing into a prefix? See **[Installing Environments](Install)**.
-- Consuming an env from your repo? See **[Consuming in a Project](Projects)**.
-- Shipping to an air-gapped host? See **[Packing](Packing)**.
-- Driving nepenthe from Python? See **[Python API](Python-API)**.
-- Storing specs/locks somewhere? See **[Storage Backends](Backends)**.
-- Want to contribute? See **[Contributing](Contribute)**.
+## Further reading
+
+- [Motivation](Motivation): the problem and alternatives.
+- [Concepts](Concepts): terminology.
+- [Manifests](Manifests): define an environment.
+- [Channels & Artifactory](Channels): configure package servers.
+- [Registry & Versioning](Registry): publish and resolve versions.
+- [Installing Environments](Install): install into a prefix.
+- [Consuming in a Project](Projects): use a shared environment in a repo.
+- [Packing](Packing): transfer environments to air-gapped hosts.
+- [Python API](Python-API): use nepenthe from Python.
+- [Storage Backends](Backends): store specs and locks.
+- [Contributing](Contribute): contribute to nepenthe.

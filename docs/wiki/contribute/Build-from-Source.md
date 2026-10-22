@@ -28,7 +28,8 @@ test                           run the tests
 
 ## Prerequisites
 
-`nepenthe` has a few system-level dependencies which you can install from your machine package manager. Other package managers like `conda`, `nix`, etc, should also work fine.
+Install system dependencies with your machine's package manager or a package
+manager such as `conda` or `nix`.
 
 ## Clone
 
@@ -45,7 +46,7 @@ Follow the instructions for [installing Rust](https://rustup.rs) for your system
 
 ## Install Python dependencies
 
-Python build and develop dependencies are specified in the `pyproject.toml`, but you can manually install them:
+Install the build and development dependencies listed in `pyproject.toml`:
 
 ```bash
 make requirements
@@ -64,9 +65,9 @@ make build
 
 ## Static standalone binary
 
-The `nepenthe` CLI can be built as a single, fully static binary (musl, no glibc,
-no Python required) that runs on any Linux host. Because the dependency tree
-includes C code (`aws-lc-rs`, `zstd`), the build cross-compiles the C with
+The `nepenthe` CLI can be built as a statically linked Linux binary using musl,
+with no glibc or Python requirement. Its dependencies include C code
+(`aws-lc-rs`, `zstd`), which is cross-compiled with
 [`zig`](https://ziglang.org/) via
 [`cargo-zigbuild`](https://github.com/rust-cross/cargo-zigbuild), so there is no
 separate musl C toolchain to install:
@@ -87,20 +88,20 @@ This produces a statically linked, stripped binary plus `np`/`npb` symlinks:
 target/x86_64-unknown-linux-musl/release/{nepenthe,np,npb}
 ```
 
-Verify it carries no dynamic dependencies:
+Verify that the binary has no dynamic dependencies:
 
 ```bash
 ldd target/x86_64-unknown-linux-musl/release/nepenthe
 # => not a dynamic executable
 ```
 
-Because `nepenthe` already uses `rustls` rather than OpenSSL throughout, the
+Because `nepenthe` uses `rustls` rather than OpenSSL, the
 static build needs no system TLS libraries. Override the target triple with
 `make dist-static MUSL_TARGET=aarch64-unknown-linux-musl` for other platforms.
 
 ## Lint and Autoformat
 
-`nepenthe` has linting and auto formatting.
+The project uses these linters and formatters:
 
 | Language | Linter      | Autoformatter | Description |
 | :------- | :---------- | :------------ | :---------- |
@@ -148,7 +149,8 @@ make fix-docs
 
 ## Testing
 
-`nepenthe` has both Python and Rust tests. The bulk of the functionality is tested in Rust; the Python tests cover the binding and can be run via `pytest`. First, install the Python development dependencies with
+Rust tests cover the core functionality; Python tests cover the bindings and run
+with `pytest`. Install the development dependencies first:
 
 ```bash
 make develop

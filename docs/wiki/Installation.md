@@ -1,7 +1,7 @@
-> **Note:** nepenthe's `pip` / `conda` packages are not yet published. For now,
-> build from source (see [Build from Source](Build-from-Source)).
+> nepenthe's `pip` / `conda` packages are not yet published.
+> [Build from source](Build-from-Source) to install it.
 
-## Pre-requisites
+## Prerequisites
 
 You need Python >=3.10 on your machine to install `nepenthe`.
 

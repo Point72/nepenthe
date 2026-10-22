@@ -1,8 +1,8 @@
 # Python API
 
-nepenthe ships a Python extension (built in Rust with [pyo3](https://pyo3.rs))
-that mirrors the [CLI](Install): the same producer `build` and consumer
-lifecycle, callable from Python without conda.
+nepenthe provides a Python extension built in Rust with [pyo3](https://pyo3.rs).
+It exposes the [CLI](Install)'s build, registry, and installation operations
+without requiring conda.
 
 ```python
 import nepenthe
@@ -125,8 +125,8 @@ Both default to `./pyproject.toml` when the path is omitted; `check` accepts a
 
 ## Recovering a manifest
 
-Recover the manifest a lock was solved from — from a bare lock file's embedded
-band, or from a registry release (see
+Recover the manifest used to build a lock from its embedded comment block or
+from a registry release (see
 [Recovering the manifest from a lock](Registry#recovering-the-manifest-from-a-lock)):
 
 ```python
@@ -161,18 +161,18 @@ for release in nepenthe.list_releases("file:///srv/nepenthe"):
 A solver conflict is reported as `satisfiable=False` with a `conflict` message
 rather than raised.
 
-## Return shapes
+## Return values
 
 | Function           | Returns                                                                                                 |
 | ------------------ | ------------------------------------------------------------------------------------------------------- |
 | `build`            | list of cell dicts (`cell`, `variant`, `python`, `platforms`, `lock_path`, `releases`)                  |
 | `create`           | summary dict (`prefix`, `environment`, `platform`, `packages`)                                          |
-| `pull`             | `int` — bytes written                                                                                   |
-| `manifest`         | `str` — the recovered manifest YAML                                                                     |
+| `pull`             | `int`: bytes written                                                                                    |
+| `manifest`         | `str`: the recovered manifest YAML                                                                      |
 | `publish` / `show` | release dict (`environment`, `platform`, `python`, `variant`, `version`, `lock`, `manifest`, `created`) |
 | `diff`             | dict (`up_to_date`, `added`, `removed`, `changed`)                                                      |
 | `status`           | dict (`prefix`, `exists`, `packages`)                                                                   |
-| `activate`         | `str` — the activation script                                                                           |
+| `activate`         | `str`: the activation script                                                                            |
 | `pack`             | summary dict (`output`, `environment`, `platforms`, `packages`, `bytes`)                                |
 | `unpack`           | summary dict (`prefix`, `environment`, `platform`, `packages`)                                          |
 | `sync`             | summary dict (`prefix`, `environment`, `platform`, `packages`)                                          |
@@ -184,7 +184,7 @@ rather than raised.
 Packages are rendered as conda triplets (`name=version=build`); `changed` is a
 list of `(installed, desired)` pairs.
 
-## Custom storage backends (fsspec bridge)
+## Custom storage backends (fsspec)
 
 Two low-level helpers read and write spec bytes through a Python
 [fsspec](https://filesystem-spec.readthedocs.io) object, for a backend that only

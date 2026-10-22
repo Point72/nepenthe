@@ -1,9 +1,9 @@
 # Installing Environments
 
 Once a lock is [published to a registry](Registry), nepenthe installs it into a
-prefix **without conda** — packages are fetched into a shared cache and linked
-into the target directory by rattler's installer. This page covers the consumer
-lifecycle, available both through the `nepenthe` CLI and the Rust library.
+prefix without conda. Rattler's installer fetches packages into a shared cache
+and links them into the target directory. These operations are available
+through the `nepenthe` CLI and the Rust library.
 
 ## The CLI
 
@@ -38,7 +38,7 @@ nepenthe <command> [options]
 Two aliases ship with the CLI: `np` is a drop-in shortcut for `nepenthe`, and
 `npb` is a shortcut for `nepenthe build` (so `npb --manifest … --env …` is the
 same as `nepenthe build --manifest … --env …`). These are **symlinks** to a
-single multicall `nepenthe` binary, which picks its behaviour from the invoked
+single multicall `nepenthe` binary, which selects its behavior from the invoked
 name. `pip install` ships the `nepenthe` binary; the `np`/`npb` symlinks are
 created post-build (the `aliases` make target), since wheel archives don't
 preserve symlinks.
@@ -48,7 +48,7 @@ Registry-backed commands take a `--registry <root-url>` plus coordinates
 
 ### Build (producer)
 
-`build` is the producer entry point: it loads a manifest, applies any override
+`build` loads a manifest, applies any override
 layer, solves every cell of the requested environment (its variant × python
 matrix), and writes and/or publishes one lock per cell.
 
@@ -74,9 +74,8 @@ publishing a multi-platform cell, the lock is registered under each platform
 coordinate (content-addressed, so the same lock is stored once).
 
 By default `build` solves the environment's whole matrix. Pass `--python` and/or
-`--variant` to build just one cell (or a slice of it) — useful for fanning the
-matrix out across independent CI jobs so one unsolvable cell doesn't fail the
-rest:
+`--variant` to select cells. This lets independent CI jobs build different cells
+so one unsolvable cell doesn't fail the rest:
 
 ```bash
 # build only the Python 3.11 cell(s) of app
@@ -85,13 +84,13 @@ nepenthe build --manifest environment.yaml --env app --python 3.11 --output-dir 
 nepenthe build --manifest environment.yaml --env app --variant gpu --python 3.12 --output-dir ./locks
 ```
 
-A `--python` (or `--variant`) that selects no cell — e.g. one the override
-layer's `exclude` table removes — is reported as "produced no build cells" so a
-caller can treat it as a skipped cell.
+A `--python` (or `--variant`) that selects no cell is reported as "produced no
+build cells" so a caller can treat it as skipped. This includes cells removed by
+the override layer's `exclude` table.
 
 ### Create
 
-Resolve a label, pull the lock, and install it — all in one step:
+Resolve a label, pull the lock, and install its packages:
 
 ```bash
 nepenthe create app \
@@ -104,8 +103,8 @@ nepenthe create app \
 
 No conda, mamba, or micromamba is required on the machine.
 
-Already have a lock file (e.g. one published as a plain artifact)? Install it
-directly — no registry, no solve. The lock's own package URLs drive the fetch:
+To install a local lock file without a registry or solve, pass `--lock`.
+Packages are downloaded from the URLs recorded in the lock:
 
 ```bash
 nepenthe create --lock app.lock --prefix ./envs/app
@@ -127,10 +126,9 @@ Package-provided activation scripts are left untouched.
 Unmarked legacy files at Nepenthe's reserved script paths are preserved;
 enabling generation reports a conflict, while disabling leaves them untouched.
 
-Packages' `post-link` scripts are **not** run: they are arbitrary code shipped
-inside a package and they make an install non-hermetic. Pass `--link-scripts` to
-`create`, `unpack`, or `sync` to execute them anyway, for channels you trust and
-packages that depend on them.
+Packages' `post-link` scripts are not run by default because they execute
+arbitrary package code during installation. For trusted channels and packages
+that require these scripts, pass `--link-scripts` to `create`, `unpack`, or `sync`.
 
 ### Publish, show, pull
 
@@ -150,10 +148,9 @@ nepenthe pull app --registry file:///srv/nepenthe \
 
 ### Export a conda `@EXPLICIT` spec
 
-For people who install with conda/mamba rather than nepenthe, render a lock as a
-`conda create --file` spec (`@EXPLICIT`: the header plus each package URL,
-topologically sorted). Source the lock from a local file or straight from the
-registry:
+Export a lock as a `conda create --file` spec for conda or mamba. The spec
+contains an `@EXPLICIT` header and topologically sorted package URLs. Read the
+lock from a local file or the registry:
 
 ```bash
 # from a local lock file
@@ -167,9 +164,9 @@ nepenthe export --env app --registry file:///srv/nepenthe \
 conda create -n app --file app.txt
 ```
 
-Omit `-o` to write the spec to stdout. The exported URLs are bare (no embedded
-credentials); private channels are authenticated at download time the same way
-`nepenthe create` is — see [Channels](Channels#authentication).
+Omit `-o` to write the spec to stdout. The exported URLs contain no embedded
+credentials; private channels are authenticated at download time the same way
+as `nepenthe create`. See [Channels](Channels#authentication).
 
 ### Inspect: status and diff
 
@@ -184,7 +181,7 @@ nepenthe diff --lock app.lock --env app --platform linux-64 --prefix ./envs/app
 # ~ numpy=2.1.0=OLD -> numpy=2.1.0=h0   (changed)
 ```
 
-`diff` and `status` are pure, offline operations — they read the prefix's
+`diff` and `status` work offline. They read the prefix's
 `conda-meta` directory and compare against the lock.
 
 ### Activate
@@ -231,15 +228,15 @@ install::remove_prefix(Path::new("./envs/app"))?;
 ```
 
 `install_lock(&lock, env, platform, prefix)` installs a lock you already have in
-memory; `create` is the registry-driven convenience that pulls it first.
+memory; `create` pulls the lock from a registry before installing it.
 
 ## How it works
 
 - **No conda dependency.** Packages are linked into the prefix by rattler's
   installer, which fetches into a shared package cache (parallel downloads,
-  hardlink dedup) — there is no shell-out to conda/mamba/micromamba.
-- **Reproducible.** The lock is the contract; install never re-solves, so every
-  machine gets a byte-identical environment.
+  hardlink deduplication). It does not call conda, mamba, or micromamba.
+- **Locked package versions.** Installs use the packages recorded for the target
+  platform without re-solving dependencies.
 - **Cross-platform activation.** `rattler_shell` renders activation for bash,
   zsh, fish, xonsh, cmd, PowerShell, and nushell, so there are no bash-only
   hooks.
