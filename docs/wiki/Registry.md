@@ -1,9 +1,8 @@
 # Registry & Versioning
 
 The **registry** is a backend-hosted index that maps a versioned environment to
-a content-addressed lock. It replaces version-in-filename schemes
-(`env-{name}-py{py}-{version}.txt`) with real, independent versioning and label
-resolution.
+a content-addressed lock. Each environment has its own versions and labels,
+without encoding them in filenames such as `env-{name}-py{py}-{version}.txt`.
 
 A registry lives under a single root URL on any [storage backend](Backends)
 (`file://`, `s3://`, `https://`) and holds two things: an `index.yaml` and a
@@ -37,15 +36,15 @@ it's an exact version.
 
 A lock is stored by its content address, `sha256-<hex>` of its bytes, under
 `<root>/locks/<address>.lock`, written once. The index records, per release,
-which address a version points to. This provides four properties:
+which address a version points to:
 
-- **Immutable** — republishing a version with identical content is a no-op;
+- **Immutable**: republishing a version with identical content is a no-op;
   republishing with different content is rejected.
-- **Deduplicated** — two versions with byte-identical locks share one object.
-- **Integrity-checked** — `pull` validates the address format
+- **Deduplicated**: versions with identical lock bytes share one object.
+- **Integrity-checked**: `pull` validates the address format
   (`sha256-<64 lowercase hex>`) and recomputes the hash of the fetched bytes,
   rejecting tampered or corrupt locks before they reach an installer.
-- **Rollback = repoint** — update the label; the lock remains unchanged.
+- **Rollback**: update the label; the lock remains unchanged.
 
 ## Publishing and resolving
 
@@ -75,7 +74,7 @@ let bytes = registry.pull(&coords, &Label::Latest)?;
 
 ## The index
 
-`index.yaml` at the registry root is the source of truth:
+`index.yaml` at the registry root records published releases:
 
 ```yaml
 releases:
@@ -88,13 +87,12 @@ releases:
     created: "2026-06-17T12:00:00Z"
 ```
 
-It is read on `resolve`/`pull` and appended on `publish`. Concurrent-publish
-safety via compare-and-swap is planned hardening; today the index assumes a
-single writer.
+It is read on `resolve`/`pull` and appended on `publish`. The index assumes a
+single writer; concurrent publishing with compare-and-swap is not implemented.
 
 ## End to end
 
-Producing a lock and publishing it ties together the earlier stages:
+Resolve a manifest, solve its dependencies, export the lock, and publish it:
 
 ```rust
 // resolve → solve → export → publish
@@ -113,15 +111,14 @@ Installing **from** a pulled lock is covered in
 
 ## Recovering the manifest from a lock
 
-A lock records what was solved, but not the manifest it was solved from, and
-re-solving (to test a dependency bump, say) needs the manifest. nepenthe keeps
-the composed manifest with every build it produces, in two ways, so it can be
-recovered from either:
+A package lock alone does not include the manifest needed to re-solve its
+dependencies. nepenthe stores the composed manifest with each build in two
+forms:
 
 - **Embedded in the lock file.** `nepenthe build --output-dir` prepends the
-  manifest to each lock as a compressed comment band (`# nepenthe:manifest+…`).
+  manifest to each lock as a compressed comment block (`# nepenthe:manifest+…`).
   It is valid YAML that pixi/rattler ignore, so the file stays a usable
-  `pixi.lock`, and the manifest travels with the bare file without a registry.
+  `pixi.lock`. The manifest can be recovered from the file without a registry.
 - **A registry sidecar.** `nepenthe build --registry …` stores the manifest as a
   content-addressed object next to the lock and points the release at it. It is
   stored once and shared by every cell/version that solved the same manifest.
@@ -137,7 +134,6 @@ nepenthe manifest --env app --registry file:///srv/nepenthe \
   --python 3.11 --variant cpu -o environment.yaml
 ```
 
-One caveat for the embedded band: a foreign tool that re-renders the lock, rather
-than just reading it, drops the comment, since it isn't part of the lock
-structure. For an immutable, nepenthe-published lock this doesn't arise, and the
-registry sidecar is unaffected either way.
+A tool that rewrites the lock may drop the embedded comment because it is not
+part of the lock structure. Reading an immutable, nepenthe-published lock does
+not change it, and the registry sidecar is unaffected.

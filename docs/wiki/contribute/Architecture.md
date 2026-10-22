@@ -3,12 +3,12 @@
 > **Audience: contributors and maintainers.** For end-user documentation, start
 > at the [wiki home](Home).
 
-This document describes how nepenthe is built: the crate layout, the module
-boundaries, what is implemented today, and the key design decisions.
+This document describes nepenthe's crate layout, modules, implementation, and
+design decisions.
 
 ## Crate layout
 
-nepenthe follows a single-library, multi-module pattern:
+nepenthe has one core library with modules for each operation:
 
 ```
 nepenthe-core (rust/)
@@ -32,7 +32,7 @@ nepenthe (pyo3 cdylib, rust/python/lib.rs)
 └── fsspec_pull / fsspec_publish — adapt a Python fsspec object to the Rust FileSystem trait
 ```
 
-Each module has one responsibility; key dependencies are listed here:
+Module responsibilities and dependencies:
 
 | Module     | Responsibility                                                                                           | Key deps                                                                |
 | ---------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
@@ -51,9 +51,8 @@ Each module has one responsibility; key dependencies are listed here:
 | `name_map` | PyPI↔conda name mapping; vendored divergent pairs + grayskull reducer                                    | `serde_yaml`                                                            |
 | `cli`      | argument parsing + command dispatch for the multicall `nepenthe` binary (`np`/`npb` via argv[0])         | `clap`, `tokio`                                                         |
 
-The project currently uses one crate, with modules as internal boundaries. A
-module can move to its own crate if compile-time isolation or an external API
-boundary requires it.
+Modules separate the core library's responsibilities. They can move to separate
+crates if compile-time isolation or an external API requires it.
 
 ## Modules
 
@@ -65,7 +64,7 @@ The following sections describe the current implementation.
 `Variant`, `EnvironmentSpec`, `Overrides`); composition (`resolve`,
 `resolve_default`, `targets`); `extends` inheritance; build-matrix axes
 (variant × python); `Manifest::apply` override layering (variant merge, pin
-baking, virtual-package + exclude/include recording, matrix pruning); validation lints
+application, virtual-package + exclude/include recording, matrix filtering); validation lints
 (`HardPin`, `TooManyHardPins`, `BaseFeatureCollision`). Imports are sandboxed
 (absolute / `..` paths rejected).
 
@@ -73,8 +72,8 @@ baking, virtual-package + exclude/include recording, matrix pruning); validation
 
 `solve.rs`: `solve(&SolveRequest, &ChannelSettings) -> SolveOutcome` fetches
 repodata via `rattler_repodata_gateway::Gateway` and solves with `rattler_solve`
-(resolvo). Channel names resolve to URLs via `ChannelSettings` (alias + mirrors),
-pure-data rewriting with no Artifactory URL hardcoded in the library. Virtual
+(resolvo). `ChannelSettings` resolves channel names using an alias and mirrors;
+the library does not hardcode Artifactory URLs. Virtual
 packages are host-detected only when solving for the current platform; a
 cross-platform solve relies on explicit overrides. `solve_environment` drives
 the full `(variant × python × platform)` matrix and fails fast
@@ -100,15 +99,15 @@ URL scheme:
 - `https://` / `http://` → `ArtifactoryFs` (GET/PUT/DELETE; basic/bearer auth; 404→`NotFound`, 401/403→`PermissionDenied`; query strings preserved)
 
 Credentials live in `AuthStore` (never in artifacts). `mask_url` redacts userinfo
-on every error path, with a string-surgery fallback for URLs `Url::parse`
-rejects. `Credential` has a **redacted `Debug`** (no secret ever printed).
-Cleartext `http://` with configured credentials is refused
+in errors, including direct string redaction for URLs `Url::parse` rejects.
+`Credential` redacts secrets in `Debug` output.
+Cleartext `http://` with configured credentials is rejected
 (`BackendError::InsecureScheme`). The pyo3 bridge (`rust/python/lib.rs`) adapts a
 user-supplied Python `fsspec.AbstractFileSystem` to the same trait.
 
 ### Registry & versioning
 
-`registry.rs`: a backend-hosted `index.yaml` is the source of truth.
+`registry.rs`: a backend-hosted `index.yaml` records published releases.
 `content_address(bytes)` is `sha256-<hex>`; a lock is written once under
 `<root>/locks/<addr>.lock`. `Coordinates` `(environment, platform, python?, variant?)` identify one version sequence; `Label` is `latest` /
 `latest-but-one` / exact / semver range. `Registry::publish` is immutable
@@ -121,16 +120,20 @@ recomputes the content address, rejecting tampered or corrupt bytes
 
 A lock records the solved packages but not the manifest required to reproduce
 the solve. For each build, the producer stores the composed (post-override)
-manifest, which can be recovered in two ways. **(A)** `embed.rs` bands it onto a written
-lock file as a gzip+base64 leading comment (`# nepenthe:manifest+gzip+b64://…`),
-portable with a bare file and ignored by pixi/rattler since leading comments are
-valid YAML. **(B)** `publish_with_manifest` stores it as a content-addressed
-sidecar under `<root>/manifests/<addr>.yaml` with `Release.manifest` pointing at
-it, deduped across every cell/version that shares the manifest. `producer::build`
-does A for `--output-dir` files and B for the registry. The `manifest` command
-and the `nepenthe.manifest` binding recover from either: try the lock's band,
-fall back to the sidecar. A foreign re-render of the lock drops the band because
-it is not part of the lock structure. The registry sidecar is unaffected.
+manifest in two forms:
+
+- `embed.rs` prepends it to a lock file as a gzip+base64 comment
+  (`# nepenthe:manifest+gzip+b64://…`). The comment stays with the file and is
+  ignored by pixi/rattler because leading comments are valid YAML.
+- `publish_with_manifest` stores it as a content-addressed sidecar under
+  `<root>/manifests/<addr>.yaml`, referenced by `Release.manifest`. Cells and
+  versions that share a manifest use the same stored object.
+
+`producer::build` embeds the manifest for `--output-dir` files and writes the
+sidecar for registry releases. The `manifest` command and `nepenthe.manifest`
+binding try the embedded comment first, then the sidecar. Tools that rewrite a
+lock may drop the comment because it is not part of the lock structure. The
+registry sidecar is unaffected.
 
 ### Install / download side
 
@@ -143,14 +146,14 @@ installed prefix; `status` reads the prefix's `conda-meta`; `remove` deletes a
 prefix; `activation_script` renders a cross-platform activation script via
 `rattler_shell`. On `create`, `write_activation_hooks` materializes the
 environment's [`activation`](crate::manifest::Activation) block (recovered from
-the lock's embedded manifest band, else the registry sidecar) into
+the lock's embedded manifest comment, else the registry sidecar) into
 `etc/conda/activate.d/nepenthe-activate.{sh,bat}`, injecting the env identity
 (`NEPENTHE_ENVIRONMENT`/`PLATFORM`/`VERSION`) so a full activation runs the
-hooks. The CLI lives in `cli.rs` as a single **multicall binary**:
-`main.rs` is a thin shim calling `cli::run_multicall`, which reads argv[0] —
-`npb` runs `nepenthe build`, any other name (`nepenthe`/`np`) runs the full CLI.
-It exposes the consumer lifecycle — `create` / `pull` / `publish` / `show` /
-`diff` / `status` / `remove` / `activate` / `cache clean` — plus the producer
+hooks. The CLI is implemented in `cli.rs` as a multicall binary.
+`main.rs` calls `cli::run_multicall`, which reads argv\[0\]: `npb` runs
+`nepenthe build`; other names (`nepenthe`/`np`) run the full CLI.
+The commands include `create` / `pull` / `publish` / `show` / `diff` / `status` /
+`remove` / `activate` / `cache clean`, plus the producer
 `build` command. The build orchestration lives in `producer.rs` (`BuildRequest`
 → load manifest, apply any override layer, `solve_environment`,
 `matrix_to_lockfiles`, then write one lock per cell (`--output-dir`) and/or
@@ -169,14 +172,14 @@ installing; results are returned as plain dicts/lists. See the
 
 ### Cross-platform & variants
 
-The solve and lock layers are cross-platform by construction. `solve` derives
+Solves and locks support multiple target platforms. `solve` derives
 the virtual-package baseline from the target platform
 (`VirtualPackages::detect_for_platform`), so a Linux host solving `win-64` /
 `osx-arm64` / `linux-aarch64` gets that platform's `__win` / `__osx` / `__glibc`
-and so on, with overrides still winning, for a reproducible cross-platform solve. Overrides for
+and so on. Explicit overrides take precedence. Overrides for
 the typed conda virtual packages (`cuda`, `archspec`, `glibc`, `osx`, `linux`,
 `win`, `cuda_arch`) are routed through rattler's `VirtualPackageOverrides` so
-each is encoded the conda way — e.g. `__cuda` stores the value in its version
+each uses conda's encoding. For example, `__cuda` stores the value in its version
 (`__cuda=12.9=0`) while `__archspec` encodes the microarchitecture in its build
 string with version `1` (`__archspec=1=skylake_avx512`); a custom name falls
 back to a version/build heuristic.
@@ -184,11 +187,11 @@ back to a version/build heuristic.
 into a single lock under one environment; `matrix_to_lockfiles` groups the
 `(variant × python × platform)` matrix into one multi-platform lock per build
 cell. The install side extracts a chosen platform's records from that shared
-lock, so `create --platform <p>` installs the right cell.
+lock, so `create --platform <p>` installs the selected platform's packages.
 
 ### Air-gapped bundles (`pack`/`unpack`)
 
-`pack.rs` bundles everything an environment needs into one `.tar` for offline
+`pack.rs` bundles a lock and its package archives into one `.tar` for offline
 install. `pack` resolves a lock, downloads each package, verifies it against the
 lock's sha256, and writes `pkgs/<filename>` plus the lock and a
 `nepenthe-pack.yml` manifest (the outer tar is uncompressed since `.conda`
@@ -202,11 +205,12 @@ the Python binding exposes `nepenthe.pack` / `nepenthe.unpack`.
 ### Consumer project integration (`sync`/`check`)
 
 `project.rs` reads a `[tool.nepenthe]` stanza from a consumer's `pyproject.toml`
-(`toml` crate) — a reference (`environment`, `registry`, `version` label,
-optional `platform`/`python`/`variant`/`prefix`), not an environment definition.
+using the `toml` crate. The stanza refers to an environment through
+`environment`, `registry`, and a `version` label, with optional
+`platform`/`python`/`variant`/`prefix` fields.
 `sync` resolves the label and installs the published lock into the prefix
 (`install::create`); it never re-solves the shared environment against the
-project's deps, which would defeat solve-once, install-identically. `check`
+project's dependencies, which could produce a different package set. `check`
 pulls the lock and compares each `[project.dependencies]` entry against the
 pinned set: `check_dependencies` (pure, unit-tested) parses a PEP 508 requirement
 to `(normalized name, version specifier)`, matches it by PEP 503-normalized name
@@ -221,12 +225,12 @@ table (`src/data/pypi_to_conda.tsv`, `include_str!`-embedded) when a direct
 normalized-name match fails, so `opencv-python` resolves to conda `opencv`. The
 table contains only the divergent pairs (~few hundred). conda-forge's grayskull
 mapping has ~12k entries, but the ~11.7k identity ones are dropped since a direct
-match handles them, keeping the artifact a few KB. `reduce_grayskull` is the pure
+match handles them, keeping the table a few KB. `reduce_grayskull` is the pure
 reducer (used by the `regenerate_name_map` example, which fetches the upstream
-YAML and rewrites the table); its sorted output diffs cleanly, so the vendored
-artifact is reproducible in-source.
+YAML and rewrites the table). Its sorted output makes changes to the bundled
+table reproducible and easy to review.
 
-### Run, overlays & ergonomics (`run`/`try`/`shell`/`list`)
+### Running commands and overlays (`run`/`try`/`shell`/`list`)
 
 `run.rs` backs `nepenthe run`: a `RunConfig` loaded from `[tool.nepenthe.run]` in
 a `pyproject.toml` or an inline `# /// nepenthe` PEP 723-style block. A run pulls
@@ -237,37 +241,37 @@ command with the prefix on `PATH` and `editable` dirs on `PYTHONPATH`. Overlay
 channels are recovered from the base lock's embedded manifest. A **PyPI overlay**
 (`overlay.pip` / `--with-pip`) is layered by shelling out to `uv`
 (`uv pip install --python <prefix>`, found on `PATH` or via `NEPENTHE_UV`). Its
-CLI is the stable integration surface, so we delegate rather than link uv's
-internal crates; the install is keyed into the prefix once via a
-`.nepenthe-pip-ready` marker. `install::exec_in_prefix` builds the activated
+CLI is used instead of linking uv's internal crates. A `.nepenthe-pip-ready`
+marker records that installation completed for the cached prefix.
+`install::exec_in_prefix` builds the activated
 environment deterministically (prefix `bin` dirs prepended, `CONDA_PREFIX` set),
 which is path activation, no `activate.d`.
 
 `producer::trial_solve` backs `nepenthe try`: recover an environment's manifest
-(band or sidecar), inject extra conda specs (from `--with` and/or a project's
+(embedded comment or sidecar), add extra conda specs (from `--with` and/or a project's
 `[project.dependencies]` mapped PyPI to conda by `project::requirements_to_conda_specs`),
 and re-solve the cell. A solver conflict means the env would not build with the
-added requirement. `shell` reuses `exec_in_prefix` to drop into `$SHELL` in a
-materialized prefix; `list` reads the registry index (`Index::environments` /
+added requirement. `shell` reuses `exec_in_prefix` to open `$SHELL` in an
+installed prefix; `list` reads the registry index (`Index::environments` /
 `releases_of`). The Python binding exposes `try_solve` and `list_releases`; `run`
 and `shell` are CLI-only, since they exec a process.
 
-`image.rs` backs `nepenthe image build`: it materializes a published environment
+`image.rs` backs `nepenthe image build`: it installs a published environment
 into a prefix (`install::create`, all packages on disk) and packages it into an
 Apptainer/SIF (`apptainer build`) or an OCI image (`podman`/`docker build`
 from a generated `Containerfile`, engine via `NEPENTHE_OCI_ENGINE`). The
 generated recipe bootstraps from a small glibc base (default
 `debian:bookworm-slim`), since a `scratch` root cannot run conda-forge binaries,
 which need the system loader and a `/bin/sh`, and copies the environment to the
-same absolute path it occupies on the host, so conda's baked prefixes, shebangs,
+same absolute path it occupies on the host, so conda's embedded prefixes, shebangs,
 and `RPATH`s resolve without relocation. `apptainer_definition` and
 `containerfile` are pure, unit-tested functions. `nepenthe run --image` reuses
 `package_sif` + `exec_in_image` to run inside a content-keyed SIF of the run
-prefix (overlays baked in, editable dirs bind-mounted).
+prefix (overlays included, editable directories bind-mounted).
 
 ### Not yet implemented
 
-- **Ecosystem & safety** — SBOM, CVE scan, `verify`, cache GC policies (`pack`/`unpack` are done).
+- **Ecosystem & safety**: SBOM, CVE scan, `verify`, cache GC policies.
 - **lock signing & attestation**, **registry concurrent-publish (CAS)**, **foreign-format override adapters**.
 - **Shared package CAS / cache daemon**, **registry web browse**, and **producer `pypi-dependencies`** end to end.
 
@@ -279,14 +283,14 @@ prefix (overlays baked in, editable dirs bind-mounted).
 1. **Backends are pluggable.** The `fsspec_rs::FileSystem` trait dispatches on
    URL scheme; the same code path serves `file://`, `s3://`, and `https://`.
    Python `fsspec` objects plug in for backends without a Rust implementation.
-1. **Credentials are injected, never baked in.** Secrets come from `AuthStore`
-   at use time; artifacts and logs never carry them (redacted `Debug`,
-   `mask_url`, cleartext-HTTP refusal).
+1. **Credentials are supplied at use time.** Secrets come from `AuthStore`
+   and are excluded from artifacts and logs through redacted `Debug` output,
+   `mask_url`, and rejection of authenticated cleartext HTTP requests.
 1. **Content-addressed, immutable locks.** Locks are stored by `sha256-<hex>`
    rather than by version, so multiple versions can share one lock. Rollback
-   repoints a label and never mutates a lock. Pulls are integrity-checked.
+   repoints a label without changing the lock. Pulls are integrity-checked.
 1. **Independent versioning.** Each `(environment, platform, python, variant)`
-   has its own semver sequence, with no global stamp.
+   has its own semver sequence.
 
 ## Testing strategy
 
@@ -299,7 +303,7 @@ prefix (overlays baked in, editable dirs bind-mounted).
 
 ### Current inventory (run `cargo test` to reproduce)
 
-Library unit tests (`rust/src`): **98 test functions — 90 run offline, 8
+Library unit tests (`rust/src`): **98 test functions: 90 run offline, 8
 `#[ignore]`** (network/live).
 
 | Module     | Offline | Ignored |

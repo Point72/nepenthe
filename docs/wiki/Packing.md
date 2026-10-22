@@ -1,8 +1,8 @@
 # Packing for Air-Gapped Hosts
 
-Some machines can't reach your conda channels: isolated build hosts, secure
-enclaves, offline labs. **Packing** bundles everything an environment needs into
-one file you can copy across the gap and install with no network and no conda.
+For machines that cannot reach conda channels, such as isolated build hosts or
+offline labs, `pack` creates a bundle of the lock and its package archives.
+Transfer the bundle to the target host and install without a network or conda.
 
 A bundle is a `.tar` archive containing the lock, a manifest, and every package
 archive the lock pins:
@@ -36,7 +36,7 @@ bundled once.
 
 ## Unpack (on the air-gapped host)
 
-Copy the `.tar` across, then install from it. `unpack` extracts the bundle,
+Transfer the `.tar` to the target host, then install from it. `unpack` extracts the bundle,
 rewrites every package URL to the bundle's local copy, and installs into a
 prefix, offline and without conda:
 
@@ -53,8 +53,8 @@ By default the bundle is extracted to a temporary directory that is removed afte
 the install. Pass `--stage-dir` to keep the extracted packages, for instance to
 install several prefixes from one bundle without re-extracting.
 
-The installed prefix is byte-identical to one created online from the same lock;
-[`diff`](Install#inspect-status-and-diff) against the lock comes back empty.
+The installed packages match an online install from the same lock;
+[`diff`](Install#inspect-status-and-diff) reports no differences.
 
 ## From Python
 
@@ -71,7 +71,7 @@ nepenthe.unpack("app.tar", "./envs/app")                        # offline instal
 nepenthe.unpack("app.tar", "./envs/app", env="app", platform="linux-64")
 ```
 
-See the [Python API](Python-API) for the full surface.
+See the [Python API](Python-API) for function signatures and return values.
 
 ## How it works
 
@@ -88,6 +88,6 @@ See the [Python API](Python-API) for the full surface.
 
 - **Authenticated channels.** Package downloads during `pack` are unauthenticated.
   Packing from a channel that requires credentials is not yet supported; pack
-  from a public or already-permitted mirror. (Tracked for a future release.)
+  from a mirror that permits unauthenticated downloads.
 - **Size.** A bundle contains the full package set, so it is as large as the
   environment and can be tens to hundreds of MiB.

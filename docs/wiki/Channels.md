@@ -1,18 +1,14 @@
 # Channels & Artifactory
 
-Channels are where **packages** come from. In a manifest you reference channels
-by name; nepenthe resolves those names to URLs at solve time. Nothing is
-hardcoded, so the same manifest can solve against public conda servers or an
-internal mirror by changing only how names resolve.
+Channels provide packages. A manifest refers to channels by name, and nepenthe
+resolves those names to URLs at solve time. Configure resolution to use public
+conda servers, Artifactory, or another mirror without changing dependencies.
 
-Set channel resolution to use your Artifactory or another server without
-changing dependencies.
+## Channel settings
 
-## Two knobs
+`ChannelSettings` supports two overrides:
 
-`ChannelSettings` has two override knobs:
-
-| Knob                       | Effect                                                                                                                                             |
+| Setting                    | Effect                                                                                                                                             |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **`channel-alias`**        | Base URL that **bare names** resolve against. `conda-forge` → `<alias>/conda-forge`.                                                               |
 | **`mirror`** (per channel) | Rewrite a channel **before** resolution, keeping its public identity. `conda-forge` → `conda-forge-mirror`, which then resolves against the alias. |
@@ -71,7 +67,7 @@ for channel in &manifest.project.channels {
 
 ## Building settings programmatically
 
-You don't need a manifest — the same overrides can be built directly:
+The same overrides can be configured without a manifest:
 
 ```rust
 use nepenthe_core::solve::ChannelSettings;
@@ -111,9 +107,9 @@ channels:
 
 A channel can require credentials, for example a private Artifactory repository.
 Credentials are never part of the channel definition, a manifest, or a lock.
-They live in an out-of-band auth store, keyed by host, and are applied as an
-`Authorization` header at request time. Package URLs in the resulting lock stay
-bare.
+They are stored separately in an auth store, keyed by host, and applied as an
+`Authorization` header at request time. Package URLs in the resulting lock do
+not contain credentials.
 
 ### Add the private channel to one environment
 
@@ -127,7 +123,7 @@ environments:
     channels: [my-private-channel]   # resolves via channel-alias, like any name
 ```
 
-### Supply the credential out of band
+### Supply credentials separately
 
 Credentials are read by rattler's authentication storage, in order, from:
 
@@ -153,7 +149,7 @@ one, and the token never appears in the lock.
 
 Some environments, GitHub Actions among them, can inject secrets as environment
 variables but cannot write files. Set `NEPENTHE_CHANNEL_AUTH` to the same JSON a
-credentials file would hold, a map of host to credential:
+credentials file would contain, a map of host to credential:
 
 ```yaml
 # GitHub Actions
@@ -164,19 +160,18 @@ credentials file would hold, a map of host to credential:
   run: nepenthe build --manifest env.yaml --env private --output-dir dist
 ```
 
-`NEPENTHE_CHANNEL_AUTH` is layered on top of the file/keyring sources at highest
-priority, so it wins for any host it defines. An unset secret expands to an empty
-string, which is ignored, and requests for public channels still go out
-unauthenticated. As with the file, the token is applied as a request header and
-never lands in the lock.
+`NEPENTHE_CHANNEL_AUTH` takes precedence over file/keyring sources for each host
+it defines. An unset secret expands to an empty string, which is ignored;
+requests for public channels remain unauthenticated. The token is applied as a
+request header and is not written to the lock.
 
 > This is **channel** (package) authentication. Credentials for the **registry**
-> that stores published manifests and locks are a separate mechanism — see
+> that stores published manifests and locks use a separate mechanism. See
 > [Storage Backends](Backends#authentication).
 
-## Try it
+## Example and tests
 
-A runnable example and its fixtures ship with the crate:
+The crate includes a runnable example and fixtures:
 
 ```bash
 cd rust

@@ -1,11 +1,10 @@
 # Motivation
 
-nepenthe exists to make large, shared software environments reproducible, fast
-to install, and safe to change, across many machines, many repositories, and
-time. This page explains the problem nepenthe solves and how common alternatives
-compare.
+nepenthe builds shared software environments that multiple repositories and
+machines can use. This page explains why those environments need frozen package
+versions and how nepenthe compares with other tools.
 
-## Frozen environments without the pain
+## Frozen environments
 
 Consistent behavior across machines and over time requires a frozen environment:
 an exact, pinned set of packages that installs the same way everywhere.
@@ -13,9 +12,9 @@ Pinning every package by hand is tedious. Changing one pin can force changes to
 many others, a problem known as
 [dependency hell](https://en.wikipedia.org/wiki/Dependency_hell).
 
-nepenthe starts from a dependency list that pins only what it has to: the things
-you actively care about, or ones with known compatibility problems. Each release
-solves that list once and freezes the result into a fully-pinned collection.
+nepenthe starts from a dependency list with constraints for the versions you
+need or known compatibility problems. Each release solves that list and freezes
+the result into a fully pinned collection.
 
 <br />
 
@@ -26,12 +25,11 @@ solves that list once and freezes the result into a fully-pinned collection.
 
 <br />
 
-Every download of a release gives you the same packages, installed without
-re-solving, so installs are fast and identical on every machine.
+Every download of a release uses the same package versions. Installs skip
+dependency solving.
 
-To change an environment you edit its root dependencies, not the solved set.
-Each change produces a new frozen environment. Old releases are never
-regenerated, so they stay stable indefinitely.
+To change an environment, edit its root dependencies and build a new release.
+Existing releases are not regenerated.
 
 <br />
 
@@ -42,16 +40,14 @@ regenerated, so they stay stable indefinitely.
 
 <br />
 
-Frequent releases provide upgrade paths, and teams move from older environments
-to newer ones in whatever increment and on whatever timeline fits their needs.
+Teams can choose when to adopt a new release.
 
-## Why not just use…?
+## Alternatives
 
 Most tools lock the dependencies of one repository. nepenthe builds and
-distributes a shared environment that many repositories consume. That difference
-rules out most of the usual options.
+distributes a shared environment that many repositories consume.
 
-### Per-project lockfiles — pixi, uv
+### Per-project lockfiles: pixi, uv
 
 [pixi](https://pixi.sh) (`pixi.lock`) and [uv](https://docs.astral.sh/uv/)
 (`uv.lock`) lock the dependencies of a single project so its developers get a
@@ -72,7 +68,7 @@ fast, reproducible setup. nepenthe reuses the same building blocks (rattler, the
 pixi locks a repo's environment; nepenthe produces and distributes the shared
 environments that repos consume. The two are complementary.
 
-### Re-solved manifests — conda `environment.yml`
+### Re-solved manifests: conda `environment.yml`
 
 A conda `environment.yml` is a manifest rather than a lock.
 `conda env create -f environment.yml` re-solves every time, which has two
@@ -80,40 +76,37 @@ consequences:
 
 - **Not reproducible.** Different machines, or the same machine at a different
   time, can get a different package set as channels evolve.
-- **Slow.** You pay for a full solve on every install.
+- **Slow.** Each install requires a full solve.
 
-The usual workaround, hand-maintaining a huge fully-pinned `environment.yml`, is
-brittle: editing one pin can force you to re-pin a cascade of transitive
-dependencies (dependency hell again). And a manifest gives you no independent
-versioning, no immutability, no content-addressed integrity, and no way to solve
-once and distribute everywhere.
+Maintaining a fully pinned `environment.yml` by hand is difficult: changing one
+pin can require changes to transitive dependencies. The manifest alone also
+does not provide versioning, immutability, or content-addressed integrity.
 
-nepenthe keeps the friendly input, a short, mostly-unpinned dependency list, and
-turns it into a frozen, versioned, installable artifact that never re-solves on
-install.
+nepenthe solves a short dependency list and records the result in a versioned
+lock. Consumers install from that lock without re-solving.
 
-### Language-scoped tools — pip, pipenv, poetry, venv
+### Language-scoped tools: pip, pipenv, poetry, venv
 
 These tools manage Python packages. Scientific and ML environments also need
 C/C++/Rust libraries, CUDA, and other native dependencies, which these tools do
 not manage. Another tool must provide those packages.
 
-### Native package managers — vcpkg, conan, nix, guix
+### Native package managers: vcpkg, conan, nix, guix
 
 These handle C/C++/Rust well, but integration with Python is awkward. nix/guix
 also have steep learning curves and bespoke ecosystems that can be difficult to
 adopt across an organization. nepenthe uses the conda ecosystem, which covers
 Python and native code, including packages such as gRPC and CUDA.
 
-### System packages — apt, dnf
+### System packages: apt, dnf
 
-System package managers change the machine globally: you can't easily run
-multiple versions of an environment side by side, reverting is disruptive, and
-nothing is portable to other hosts. That makes parallel production deployments
-and air-gapped or colo installs painful, which are exactly the cases nepenthe
-targets.
+System package managers change the machine globally. Running multiple versions
+of an environment side by side or reverting to an earlier version is difficult,
+and the installed environment is not portable to other hosts. nepenthe installs
+into separate prefixes for parallel deployments and supports bundles for
+air-gapped or colocated hosts.
 
-### Container images — Docker / OCI
+### Container images: Docker / OCI
 
 Container images must be rebuilt when their contents change. They also do not
 provide a lightweight package environment that you can `diff`, `activate`, or
@@ -122,20 +115,20 @@ baked into an image to give it a reproducible, auditable environment.
 
 ## How nepenthe is different
 
-| Property                          | What nepenthe gives you                                                                            |
-| --------------------------------- | -------------------------------------------------------------------------------------------------- |
-| **Multi-language**                | The conda ecosystem — Python, C, C++, Rust, CUDA, native libs — in one environment                 |
-| **Solve once, freeze**            | Reproducible everywhere and fast to install; installs never re-solve                               |
-| **Shared, not per-repo**          | A collection many repos consume, rather than a lock belonging to one of them                       |
-| **Independently versioned**       | Each environment has its own semver sequence — no global stamp, no filename encoding               |
-| **Immutable & content-addressed** | A published version never changes; rollback repoints a label; pulls are integrity-checked          |
-| **Portable & isolated**           | Install in parallel, swap a symlink to revert, sync wholesale to restricted networks               |
-| **Backend-agnostic**              | Specs and locks live on any backend (`file://`, `s3://`, `https://`); channels point at any server |
-| **Install without conda**         | A single binary links the lock into a prefix — no conda/mamba/micromamba on the target             |
+| Property                          | nepenthe behavior                                                                                   |
+| --------------------------------- | --------------------------------------------------------------------------------------------------- |
+| **Multi-language**                | Python, C, C++, Rust, CUDA, and other native libraries from the conda ecosystem in one environment  |
+| **Solve once, freeze**            | Reproducible everywhere and fast to install; installs never re-solve                                |
+| **Shared environments**           | Multiple repos consume the same environment                                                         |
+| **Independently versioned**       | Each environment has its own semver sequence                                                        |
+| **Immutable & content-addressed** | A published version never changes; rollback repoints a label; pulls are integrity-checked           |
+| **Portable & isolated**           | Install in parallel, swap a symlink to revert, transfer bundles to restricted networks              |
+| **Backend-agnostic**              | Specs and locks live on any backend (`file://`, `s3://`, `https://`); channels point at any server  |
+| **Install without conda**         | A single binary installs from the lock into a prefix; conda, mamba, and micromamba are not required |
 
-## Where next?
+## Further reading
 
-- **[Concepts](Concepts)** — the vocabulary (manifests, features, variants, locks, registry).
-- **[Manifests](Manifests)** — author an environment.
-- **[Registry & Versioning](Registry)** — publish and resolve versions.
-- **[Installing Environments](Install)** — create a prefix from a lock.
+- [Concepts](Concepts): manifests, features, variants, locks, and registries.
+- [Manifests](Manifests): define an environment.
+- [Registry & Versioning](Registry): publish and resolve versions.
+- [Installing Environments](Install): create a prefix from a lock.

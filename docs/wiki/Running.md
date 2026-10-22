@@ -1,18 +1,16 @@
 # Running in an Environment
 
 `nepenthe run` executes a command in a versioned, pre-solved environment with an
-optional overlay of extra dependencies. Think of it as a structured `uv run`,
-where the reproducibility unit is `(base lock + overlay + command)`. The base is
-frozen and installed without conda; a conda overlay is re-solved on top with the
-base pinned as constraints, and a PyPI overlay is layered with
-[uv](https://docs.astral.sh/uv/), so the combined environment stays consistent.
+optional overlay of extra dependencies. The base is installed from a frozen
+lock without conda. Conda overlay dependencies are solved with the base packages
+pinned as constraints; PyPI overlay dependencies are installed with
+[uv](https://docs.astral.sh/uv/).
 
 ## Declaring a run
 
-Two config sources share one schema.
+Run configuration uses the same schema in two locations.
 
-**Structured — `[tool.nepenthe.run]` in `pyproject.toml`**, for a tool or
-library:
+**`[tool.nepenthe.run]` in `pyproject.toml`**, for a tool or library:
 
 ```toml
 [tool.nepenthe.run]
@@ -29,7 +27,7 @@ command = "python -m mytool"       # string, or an array ["python", "-m", "mytoo
 nepenthe run                       # reads ./pyproject.toml
 ```
 
-**Inline — a PEP 723-style block in a script**, for one-off scripts:
+**A PEP 723-style block in a script**, for one-off scripts:
 
 ```python
 # /// nepenthe
@@ -64,28 +62,28 @@ one-line summary to stderr.
 
 ## How it works
 
-1. **Materialize the base.** The published lock for the coordinates is pulled and
-   installed into a content-keyed cache prefix, reused across runs so there is no
-   re-install when the `(base, overlay)` pair is unchanged. No conda required.
-1. **Lay the conda overlay.** The `overlay.conda` / `--with` specs are solved with
+1. **Install the base.** The published lock for the coordinates is pulled and
+   installed into a content-keyed cache prefix. Runs reuse the prefix when the
+   `(base, overlay)` pair is unchanged.
+1. **Install the conda overlay.** The `overlay.conda` / `--with` specs are solved with
    the base packages pinned as `==` constraints, so the overlay can only add
    packages and never change a base version, against the base environment's
    channels (recovered from the lock's [embedded manifest](Registry#recovering-the-manifest-from-a-lock)).
    Only the new packages are installed on top.
-1. **Lay the PyPI overlay.** The `overlay.pip` / `--with-pip` requirements are
+1. **Install the PyPI overlay.** The `overlay.pip` / `--with-pip` requirements are
    installed into the prefix with [uv](https://docs.astral.sh/uv/) (`uv pip install --python <prefix>`), resolving against and reusing what the base
    already provides. This runs once per content-keyed prefix. A
    `.nepenthe-pip-ready` marker allows recovery after a partial failure.
    uv is found on `PATH`, or via the `NEPENTHE_UV` environment variable.
-1. **Exec.** The command runs with the prefix on `PATH` and `editable`
+1. **Run the command.** The command runs with the prefix on `PATH` and `editable`
    directories prepended to `PYTHONPATH`. With `--image`, it instead runs inside a
    SIF image of the prefix (see below).
 
 ## Capturing the overlay as a lock
 
-The run prefix is already content-keyed, but you can also emit a standalone
-overlay lock: the conda packages solved on top of the base plus the uv-compiled
-(`uv pip compile`) PyPI closure, so the delta is reproducible on its own:
+Use `--emit-overlay-lock` to save the overlay's resolved dependencies separately.
+The file records conda packages solved against the base and the PyPI dependency
+set produced by `uv pip compile`:
 
 ```bash
 nepenthe run --with polars --with-pip rich \
@@ -100,16 +98,16 @@ polars=1.9.0=py311h0
 rich==13.9.4
 ```
 
-## Materialization tiers
+## Installation and isolation options
 
-By default the overlay is installed into a sibling prefix, which is cheap and
-runs in userspace. Two stronger tiers are available:
+By default the overlay is installed into a sibling prefix in userspace. Two
+other options are available:
 
-- **Copy-on-write clone** (`--clone`) — materialize the base once, then clone it
-  per overlay and install only the delta on top. On a reflink-capable filesystem
-  (btrfs, XFS-reflink, APFS) the clone is near-instant and space-efficient;
-  elsewhere it falls back to a plain copy.
-- **Image** (`--image`) — run inside a SIF (see below).
+- **Copy-on-write clone** (`--clone`): install the base once, clone it per overlay,
+  and install the additional packages. Reflink-capable filesystems (btrfs,
+  XFS-reflink, APFS) share unchanged data between clones; other filesystems use
+  a plain copy.
+- **Image** (`--image`): run inside a SIF (see below).
 
 ```bash
 nepenthe run --clone --with polars -- python -m mytool
@@ -118,10 +116,9 @@ nepenthe run --clone --with polars -- python -m mytool
 ### Running in an image (`--image`)
 
 `nepenthe run --image` runs the command inside an Apptainer/SIF image of the
-materialized environment instead of directly in the host prefix, for stronger
-isolation with the same reproducibility unit. The image is packaged from the
-exact content-keyed prefix (base plus conda and PyPI overlays, all baked in) and
-cached alongside it (`<prefix>.sif`), so it is built once and reused.
+installed environment instead of directly in the host prefix. The image includes
+the base and both overlays from the content-keyed prefix. It is cached alongside
+the prefix as `<prefix>.sif` and reused across runs.
 
 ```bash
 # build (once) a SIF of the env + overlay, then exec inside it
@@ -141,26 +138,25 @@ nepenthe run --image --overlay-image scratch.img -- python -m mytool
 `editable` directories are bind-mounted into the container at their host paths
 and added to `PYTHONPATH`, so commands can import from the working tree.
 `--base` overrides the OS base image (default `debian:bookworm-slim`). `--lazy`
-trades portability for a much smaller image (it needs the host prefix at run
-time); `--writable` adds an in-memory writable layer, and `--overlay-image`
+creates a smaller image that requires the host prefix at run time.
+`--writable` adds an in-memory writable layer, and `--overlay-image`
 persists writes to an EXT3 overlay file. These need `apptainer` (see
 [Building Images](Images)).
 
 ### Editable / working-tree overlay
 
-`editable = ["."]` prepends your working tree to `PYTHONPATH`, so it runs against
-a base that does not contain your library, avoiding shadowing and version skew.
-This is how you develop a library against the environment that ships it: the base
-provides the dependencies, your tree provides the library.
+`editable = ["."]` prepends your working tree to `PYTHONPATH`. To develop a library
+against its shared dependencies, use a base without the library installed so
+Python imports it from your working tree.
 
 ## Limitations
 
 - **PyPI overlays require uv.** `overlay.pip` / `--with-pip` shells out to the
-  `uv` binary (its CLI is the stable surface); install uv or point `NEPENTHE_UV`
-  at it. The delta is installed into the run prefix; pass `--emit-overlay-lock`
+  `uv` binary; install uv or point `NEPENTHE_UV`
+  at it. The additional packages are installed into the run prefix; pass `--emit-overlay-lock`
   to also capture it (conda pins + `uv pip compile`) as a standalone lock.
-- **`--image` needs apptainer.** The image tier shells out to `apptainer` and
-  bakes the whole prefix into a SIF; see [Building Images](Images) for details
+- **`--image` needs apptainer.** The command calls `apptainer` to package
+  the whole prefix into a SIF; see [Building Images](Images) for details
   and the `NEPENTHE_APPTAINER` override.
 - **Path activation, not full activation.** `activate.d` hook scripts are not
   run. The prefix's interpreter and tools are on `PATH` with `CONDA_PREFIX` set,

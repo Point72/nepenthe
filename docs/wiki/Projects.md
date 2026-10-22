@@ -1,9 +1,9 @@
 # Consuming an Environment in a Project
 
 A repository that uses a shared nepenthe environment declares it in its
-`pyproject.toml`. This is a small reference — which environment, which version —
-rather than the environment definition. From it, nepenthe can install the
-environment (`sync`) and check your project's dependencies against it (`check`).
+`pyproject.toml`. The reference identifies the environment and version; it does
+not redefine the environment. Use `sync` to install it and `check` to compare
+your project's dependencies with its package versions.
 
 ## Why a reference, not a re-solve
 
@@ -13,9 +13,8 @@ exact lock. `sync` therefore installs the published environment as-is. It does
 not re-resolve the environment together with your project's dependencies, since
 that would give different consumers different environments.
 
-`check` keeps the two aligned. It tells you whether what your project declares in
-`[project.dependencies]` is compatible with the environment you reference, so you
-catch drift early.
+`check` reports whether `[project.dependencies]` is compatible with the
+referenced environment.
 
 ## Register the environment
 
@@ -44,7 +43,7 @@ prefix = ".venv"                     # optional: install location (default ".ven
 
 Two optional sub-tables, `[tool.nepenthe.package-mappings]` and
 `[tool.nepenthe.extras-mappings]`, adjust how PyPI requirement names are matched
-against conda packages — see [Overriding the name map](#overriding-the-name-map).
+against conda packages. See [Overriding the name map](#overriding-the-name-map).
 
 ## `sync` — install the referenced environment
 
@@ -74,14 +73,14 @@ nepenthe check --platform osx-arm64
 `check` pulls the environment's lock and compares each `[project.dependencies]`
 entry against the pinned package set:
 
-- **ok** — the environment pins a version satisfying your requirement.
-- **conflict** — the environment pins the package, but at a version your
+- **ok**: the environment pins a version satisfying your requirement.
+- **conflict**: the environment pins the package, but at a version your
   requirement excludes. `check` exits non-zero, so it fails CI.
-- **missing** — the environment has no package with that name. This is often
-  fine, for instance a pure-Python dependency you install yourself on top, so it
-  is reported but does not fail the command.
-- **skip** — the entry isn't a simple name+version requirement (a direct URL,
-  say), so it can't be checked.
+- **missing**: the environment has no package with that name. This is reported
+  but does not fail the command, allowing dependencies you install separately,
+  such as pure-Python packages.
+- **skip**: the entry isn't a simple name+version requirement, such as a direct
+  URL, so it can't be checked.
 
 A typical CI step:
 
@@ -102,7 +101,7 @@ if report["has_conflicts"]:
             print(dep["requirement"], "→ env pins", dep["found"])
 ```
 
-See the [Python API](Python-API) for the full surface.
+See the [Python API](Python-API) for function signatures and return values.
 
 ## Name matching (conda vs PyPI)
 
@@ -115,18 +114,17 @@ consults a bundled PyPI-to-conda name map (derived from conda-forge's
 dependency still resolves. Only names absent under both spellings report as
 missing.
 
-The map is small by design: only the few hundred divergent names are vendored,
-since the ~12k names that already agree are handled by the direct match. It is
-regenerated from the upstream source with a single command — see
+The bundled map contains only the few hundred names that differ; the roughly
+12,000 names that agree are matched directly. To regenerate it from the upstream
+source, see
 [Updating the name map](#updating-the-name-map) below. For an obscure or very new
 package, a `missing` result means the map could not confirm a match; it does not
 prove that no conda package exists.
 
 ### Overriding the name map
 
-The vendored map only knows what conda-forge knows. A project that depends on
-distributions packaged elsewhere, or that packages its own, can say how those
-names translate without waiting for the vendored table to be regenerated:
+The bundled map comes from conda-forge. For distributions packaged elsewhere or
+by your project, define mappings locally:
 
 ```toml
 [tool.nepenthe.package-mappings]
@@ -149,8 +147,7 @@ per package.
 
 Keys are normalized, so casing, separator style and the order of extras in the
 key do not matter. An extras group with no mapping resolves to the distribution
-name alone — the same result the requirement would have produced without the
-group.
+name alone, as if the requirement had no extras.
 
 Both tables also apply to `nepenthe try --project`, which reads them without
 requiring the rest of the `[tool.nepenthe]` stanza.
@@ -165,14 +162,14 @@ cd rust
 cargo run --example regenerate_name_map   # fetches, reduces, rewrites the table
 ```
 
-The reducer keeps only divergent pairs and sorts the output, so a regenerated
-table diffs cleanly — commit it if it changed.
+The reducer keeps only pairs whose names differ and sorts the output. Commit
+the table if it changed.
 
-## What's not here yet
+## Limitations
 
 - **No joint resolution** with `uv` / `pixi` locks. nepenthe installs the shared
   base; you manage your project's own dependencies on top, for example with
-  `uv`/`pip` into the same prefix. `check` keeps the two honest, but nepenthe
+  `uv`/`pip` into the same prefix. `check` reports version conflicts; nepenthe
   does not merge or re-solve locks.
 - **No `pixi.toml` / `uv.lock` import.** The reference lives in
   `[tool.nepenthe]`; other lockfiles are independent.

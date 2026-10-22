@@ -13,37 +13,33 @@ Forget your environment sorrows
 [![PyPI](https://img.shields.io/pypi/v/nepenthe.svg)](https://pypi.python.org/pypi/nepenthe)
 
 **nepenthe** builds, versions, and distributes large shared conda/PyPI
-environments. Describe an environment once, solve it **once** with
-[rattler](https://github.com/conda/rattler), freeze it into a portable lockfile,
-and publish that lock to a versioned registry on any storage backend — so every
-machine installs the exact same environment without re-solving.
+environments. It solves a dependency manifest with
+[rattler](https://github.com/conda/rattler) and records the result in a portable
+lockfile. Publish that lock to a versioned registry so other machines can install
+the same packages without re-solving.
 
-- **Manifest-based composition** — declarative environments instead of scattered requirement files
-- **Native solving** — rattler in pure Rust, no Python interpreter overhead
-- **Portable locks** — multi-platform `rattler_lock` files, reproducible by construction
-- **Cross-platform** — solve `linux-64` / `osx-arm64` / `win-64` from one host into a single multi-platform lock
-- **Pluggable backends** — read/write specs to `file://`, `s3://`, `https://`; channels point at any server (e.g. an internal Artifactory)
-- **Versioned registry** — independent per-environment versioning, immutable content-addressed locks
-- **Install without conda** — link a lock into a prefix with rattler; no conda/mamba/micromamba required
-- **Conda-compatible** — export any lock as an `@EXPLICIT` spec for `conda create --file`
-- **Secure by default** — credentials injected at use time, never written into artifacts
+- **Manifests** describe dependencies and compose environments.
+- **Rust solver** uses rattler without a Python interpreter.
+- **Multi-platform locks** store `linux-64`, `osx-arm64`, and `win-64` environments in one `rattler_lock` file, solved from one host.
+- **Storage backends** read and write specs using `file://`, `s3://`, and `https://`; package channels can use servers such as Artifactory.
+- **Versioned registry** tracks each environment independently and stores immutable, content-addressed locks.
+- **Installation** links packages into a prefix with rattler; conda, mamba, and micromamba are not required.
+- **Conda export** converts a lock to an `@EXPLICIT` spec for `conda create --file`.
+- **Credentials** are supplied at use time and never written into artifacts.
 
-nepenthe covers the full producer → consumer lifecycle: compose a manifest,
-solve and freeze multi-platform locks, publish them to a versioned registry, and
-install them without conda — from the CLI or Python, with air-gapped `pack` /
-`unpack` bundles and a `pyproject.toml` integration that keeps a project's
-dependencies in sync with the environment it consumes.
+The CLI and Python API support building, publishing, and installing environments.
+Use `pack` / `unpack` bundles for air-gapped machines and `pyproject.toml`
+integration to check a project's dependencies against its shared environment.
 
 ## Why nepenthe?
 
-To behave consistently across many machines and over time, you want **frozen
-environments**. But pinning everything by hand makes upgrades miserable and
-leads to [dependency hell](https://en.wikipedia.org/wiki/Dependency_hell).
+Frozen environments keep package versions consistent across machines and over
+time. Maintaining every pin by hand makes upgrades difficult and can lead to
+[dependency hell](https://en.wikipedia.org/wiki/Dependency_hell).
 
-nepenthe starts from a list of dependencies where you pin only what you must.
-Each release **solves once** and freezes the result into a fully-pinned
-collection, so every download gives the **same** packages — installed without
-re-solving.
+With nepenthe, you specify dependencies and the version constraints you need.
+Each release solves that list and freezes the result. Consumers install those
+packages without re-solving.
 
 <br />
 
@@ -54,34 +50,31 @@ re-solving.
 
 <br />
 
-You evolve an environment by editing its **root** dependencies, not the solved
-set; each release produces a new frozen environment, and teams move between
-versions on their own timeline.
+To update an environment, edit its root dependencies and build a new release.
+Teams can choose when to adopt it.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Point72/nepenthe/refs/heads/main/docs/img/environment-evolution-inverted.svg">
   <img width=800 src="https://raw.githubusercontent.com/Point72/nepenthe/refs/heads/main/docs/img/environment-evolution.svg" alt="Editing the root dependency list over time (arrow down the left) produces a new fully-pinned environment at each step (right).">
 </picture>
 
-This is different from per-project lockfiles (pixi, uv) and re-solved manifests
-(`environment.yml`): nepenthe builds and distributes a **shared environment that
-many repos consume**, versioned and immutable. See
+Unlike per-project lockfiles (pixi, uv) and re-solved manifests
+(`environment.yml`), nepenthe distributes versioned, immutable environments for
+multiple repos to share. See
 [Motivation](docs/wiki/Motivation.md) for the full comparison.
 
 ## Documentation
 
-| For                                            | Read                                                                                                                                                                                                                                                                                                                                                                                      |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Why it exists** — the problem & alternatives | [Motivation](docs/wiki/Motivation.md)                                                                                                                                                                                                                                                                                                                                                     |
-| **Users** — concepts and how-to                | The [wiki](docs/wiki/Home.md): [Concepts](docs/wiki/Concepts.md), [Manifests](docs/wiki/Manifests.md), [Channels & Artifactory](docs/wiki/Channels.md), [Registry](docs/wiki/Registry.md), [Installing](docs/wiki/Install.md), [Consuming in a Project](docs/wiki/Projects.md), [Packing](docs/wiki/Packing.md), [Python API](docs/wiki/Python-API.md), [Backends](docs/wiki/Backends.md) |
-| **Getting started**                            | [Installation](docs/wiki/Installation.md)                                                                                                                                                                                                                                                                                                                                                 |
-| **Contributors** — how it's built              | [Architecture](docs/wiki/contribute/Architecture.md)                                                                                                                                                                                                                                                                                                                                      |
+| For                                             | Read                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Why it exists:** the problem and alternatives | [Motivation](docs/wiki/Motivation.md)                                                                                                                                                                                                                                                                                                                                                     |
+| **Users:** concepts and how-to guides           | The [wiki](docs/wiki/Home.md): [Concepts](docs/wiki/Concepts.md), [Manifests](docs/wiki/Manifests.md), [Channels & Artifactory](docs/wiki/Channels.md), [Registry](docs/wiki/Registry.md), [Installing](docs/wiki/Install.md), [Consuming in a Project](docs/wiki/Projects.md), [Packing](docs/wiki/Packing.md), [Python API](docs/wiki/Python-API.md), [Backends](docs/wiki/Backends.md) |
+| **Getting started**                             | [Installation](docs/wiki/Installation.md)                                                                                                                                                                                                                                                                                                                                                 |
+| **Contributors:** how it's built                | [Architecture](docs/wiki/contribute/Architecture.md)                                                                                                                                                                                                                                                                                                                                      |
 
 ## Quickstart
 
-From a dependency list to a solved environment — a portable **lockfile** and a
-conda-installable **spec file** — with no registry and no conda. Describe the
-environment in a small manifest, pinning only what you must:
+Create a manifest with the dependencies and version constraints you need:
 
 ```yaml
 # environment.yaml
@@ -99,24 +92,21 @@ environments:
   app: []
 ```
 
-**Solve it once** into a fully-pinned, multi-platform lockfile — no registry, no
-conda:
+Build a fully pinned lockfile without a registry or conda:
 
 ```bash
 nepenthe build --manifest environment.yaml --env app --output-dir .
 # → app-py3.11.lock      the reproducible artifact: every install gives these exact packages
 ```
 
-**Want a conda spec?** Render the lock as a `conda create --file` (`@EXPLICIT`)
-spec — so people who use conda/mamba can install it too:
+Export the lock as an `@EXPLICIT` spec for installation with conda or mamba:
 
 ```bash
 nepenthe export --env app --lock app-py3.11.lock --platform linux-64 -o app.txt
 # → app.txt              @EXPLICIT list of package URLs
 ```
 
-**Install it** — straight from the spec with conda, or from the lock with
-nepenthe (no conda required):
+Install from the spec with conda, or publish the lock and install with nepenthe:
 
 ```bash
 # with conda/mamba, from the spec — nepenthe not needed on this machine
@@ -129,17 +119,12 @@ nepenthe create app --registry file:///srv/nepenthe --python 3.11 --prefix ./env
 eval "$(nepenthe activate --prefix ./envs/app)"
 ```
 
-That's the whole vision: **describe once, solve once, distribute everywhere** —
-as a versioned lock for nepenthe consumers and an `@EXPLICIT` spec for conda
-users, from the same solve.
-
 The CLI is a single multicall binary: `np` and `npb` are symlinks to `nepenthe`
 (dispatch on the invoked name). `np` behaves exactly like `nepenthe`, and `npb`
 is a shortcut for `nepenthe build` (so the build step above is just
 `npb --manifest environment.yaml --env app --output-dir .`).
 
-The same lifecycle is available from **Python** (a binding that mirrors the CLI,
-no conda required):
+The Python API provides the same operations without requiring conda:
 
 ```python
 import nepenthe
@@ -152,8 +137,8 @@ nepenthe.create("app", "file:///srv/nepenthe", "./envs/app")
 print(nepenthe.activate("./envs/app"))
 ```
 
-A repo that consumes a shared environment can pin it in its `pyproject.toml` and
-keep its own dependencies honest against it:
+A repo can pin its shared environment in `pyproject.toml` and check that its
+dependencies are compatible:
 
 ```toml
 [tool.nepenthe]
@@ -169,8 +154,8 @@ nepenthe check     # verify [project.dependencies] are compatible (fails on conf
 
 See [Installing Environments](docs/wiki/Install.md) for the complete CLI
 reference, [Consuming in a Project](docs/wiki/Projects.md) for the
-`pyproject.toml` workflow, [Python API](docs/wiki/Python-API.md) for the Python
-surface, [Manifests](docs/wiki/Manifests.md) for the manifest format, and the
+`pyproject.toml` workflow, [Python API](docs/wiki/Python-API.md) for the bindings,
+[Manifests](docs/wiki/Manifests.md) for the manifest format, and the
 runnable [`rust/examples/`](rust/examples) for the producer side.
 
 ## Contributing
@@ -181,4 +166,4 @@ Contributions are welcome under the [Apache 2.0 license](LICENSE). See
 
 ## License
 
-Apache-2.0 — see [LICENSE](LICENSE) for details.
+Apache-2.0. See [LICENSE](LICENSE) for details.

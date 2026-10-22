@@ -1,9 +1,8 @@
 # Storage Backends
 
-A **spec backend** is where specifications — manifests, override layers, and
-locks — are read from and written to. nepenthe addresses every backend by URL
-scheme through a single `SpecStore`, so the same code path serves a local file,
-an S3 bucket, or an Artifactory HTTP endpoint.
+A **spec backend** stores manifests, override layers, and locks. `SpecStore`
+selects the backend by URL scheme for local files, S3 buckets, and Artifactory
+HTTP endpoints.
 
 This is distinct from [channels](Channels): channels are where _packages_ come
 from; backends are where _specs and locks_ live.
@@ -62,30 +61,29 @@ For S3, credentials and region/endpoint come from the `AuthStore` entry for the
 bucket, or fall back to the ambient AWS chain (env vars, profile, instance
 metadata). Set `AWS_ENDPOINT_URL` to target an S3-compatible store.
 
-## Security guarantees
+## Credential handling
 
-nepenthe avoids leaking secrets on every path:
+nepenthe handles credentials as follows:
 
-- **Redacted logging** — `mask_url` replaces any userinfo in a URL with `***`
-  before it reaches a log or error, with a string-surgery fallback for URLs that
-  don't fully parse, so a malformed URL can't leak a password.
-- **Redacted debug** — credential types never print their secret material.
-- **No cleartext credentials** — a `http://` URL with configured credentials is
-  refused; use `https://`.
-- **Credential-free artifacts** — published manifests and locks never contain
+- **Logging**: `mask_url` replaces URL userinfo with `***` in logs and errors.
+  If URL parsing fails, it redacts userinfo from the string directly.
+- **Debug output**: credential types do not print secrets.
+- **Transport**: a `http://` URL with configured credentials is rejected; use
+  `https://`.
+- **Artifacts**: published manifests and locks do not contain
   credentials.
 
 ## HTTP error mapping
 
-The HTTP backend maps notable statuses to descriptive errors, with the URL
+The HTTP backend maps response statuses to errors, with the URL
 masked: `404 → NotFound`, `401`/`403 → PermissionDenied`. Query strings are
 preserved, so signed or versioned URLs work.
 
-## Bring-your-own backend (Python fsspec)
+## Python fsspec backends
 
 When a backend exists only as a Python
-[`fsspec.AbstractFileSystem`](https://filesystem-spec.readthedocs.io/) — a
-bespoke or third-party store — two low-level helpers read and write spec bytes
+[`fsspec.AbstractFileSystem`](https://filesystem-spec.readthedocs.io/),
+two low-level helpers read and write spec bytes
 through it by adapting the object to the Rust `FileSystem` trait:
 
 ```python
@@ -98,10 +96,9 @@ data = nepenthe.fsspec_pull(fs, "/specs/app.lock")
 ```
 
 These helpers move a whole spec file at a time (`fsspec_publish` writes all the
-bytes, `fsspec_pull` reads them back). They are low-level on purpose: the
-high-level commands (`build`, `create`, `sync`) address backends by URL
-(`file://`, `s3://`, `https://`) and do not accept an fsspec object. Reach for
-the helpers when you need to stage a manifest or lock through a store that has
+bytes, `fsspec_pull` reads them back). The high-level commands (`build`, `create`,
+`sync`) address backends by URL (`file://`, `s3://`, `https://`) and do not
+accept an fsspec object. Use the helpers to transfer a manifest or lock through a store that has
 no native URL backend.
 
 ## Registries are built on backends
