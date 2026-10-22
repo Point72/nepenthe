@@ -10,46 +10,46 @@
 
 ## Step 1: Build from Source
 
-Build `nepenthe` from source using the
-[build instructions](Build-from-Source).
+To work on `nepenthe`, you are going to need to build it from source. See
+[Build from Source](Build-from-Source) for
+detailed build instructions.
 
-Then configure `git` and your GitHub account for development.
+Once you've built `nepenthe` from a `git` clone, you will also need to
+configure `git` and your GitHub account for `nepenthe` development.
 
 ## Step 2: Configuring Git and GitHub for Development
 
 ### Create your fork
 
-Create a personal fork using the "Fork" button at
-https://github.com/Point72/nepenthe or the
-[fork page](https://github.com/Point72/nepenthe/fork). Select your personal
-GitHub account as the owner and click "Create fork".
+The first step is to create a personal fork of `nepenthe`. To do so, click
+the "fork" button at https://github.com/Point72/nepenthe, or just navigate
+[here](https://github.com/Point72/nepenthe/fork) in your browser. Set the
+owner of the repository to your personal GitHub account if it is not
+already set that way and click "Create fork".
 
 ### Configure remotes
 
-Configure `git` remotes for the main Point72 repository and your fork. See the
-[GitHub Docs](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/configuring-a-remote-repository-for-a-fork).
+Next, you should set some names for the `git` remotes corresponding to
+main Point72 repository and your fork. See the [GitHub Docs](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/configuring-a-remote-repository-for-a-fork) for more information.
 
 ### Authenticating with GitHub
 
-Follow GitHub's [SSH setup instructions](https://docs.github.com/en/authentication/connecting-to-github-with-ssh)
-to create a key and configure access. If your environment blocks SSH, use a
-[personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
-for Git over HTTPS. GitHub also supports
-[passkeys](https://docs.github.com/en/authentication/authenticating-with-a-passkey/about-passkeys)
-for signing in through a browser.
+If you have not already configured `ssh` access to GitHub, you can find
+instructions to do so
+[here](https://docs.github.com/en/authentication/connecting-to-github-with-ssh),
+including instructions to create an SSH key if you have not done
+so. Authenticating with SSH is usually the easiest route. If you are working in
+an environment that does not allow SSH connections to GitHub, you can look into
+[configuring a hardware
+passkey](https://docs.github.com/en/authentication/authenticating-with-a-passkey/about-passkeys)
+or adding a [personal access
+token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
+to avoid the need to type in your password every time you push to your fork.
 
 ## Guidelines
 
-Before submitting a change, run the [lints](Build-from-Source#lint-and-autoformat)
-and [tests](Build-from-Source#testing). Squash commits into logical units and
-sign off each commit with `git commit -s` to satisfy the
-[Developer Certificate of Origin](https://en.wikipedia.org/wiki/Developer_Certificate_of_Origin)
-requirement.
+After developing a change locally, ensure that both [lints](Build-from-Source#lint-and-autoformat) and [tests](Build-from-Source#testing) pass. Commits should be squashed into logical units, and all commits must be signed (e.g. with the `-s` git flag). We require [Developer Certificate of Origin](https://en.wikipedia.org/wiki/Developer_Certificate_of_Origin) for all contributions.
 
-Open a [draft pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/about-pull-requests#draft-pull-requests)
-for work in progress, or a regular pull request when it is ready for review.
-Review may take a few days. Address requested changes and squash commits as
-needed before a maintainer approves and merges the pull request.
+If your work is still in-progress, open a [draft pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/about-pull-requests#draft-pull-requests). Otherwise, open a normal pull request. It might take a few days for a maintainer to review and provide feedback, so please be patient. If a maintainer asks for changes, please make said changes and squash your commits if necessary. If everything looks good to go, a maintainer will approve and merge your changes for inclusion in the next release.
 
-Maintainers may close pull requests for non-substantive changes or large changes
-that were not discussed beforehand.
+Please note that non substantive changes, large changes without prior discussion, etc, are not accepted and pull requests may be closed.
