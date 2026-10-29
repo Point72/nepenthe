@@ -74,7 +74,7 @@ nepenthe image build app \
 
 This installs the environment, generates a `Containerfile` (`FROM <base>` +
 `COPY . <prefix>`), and builds the image into your local engine's store. Run it
-with any command; the environment is on `PATH`:
+with any command; the environment is activated first:
 
 ```bash
 podman run --rm nepenthe-app:1.0.0 python -c "import numpy; print(numpy.__version__)"
@@ -83,7 +83,36 @@ docker run --rm nepenthe-app:1.0.0 python --version
 
 The engine is podman if present, else docker; override with
 `NEPENTHE_OCI_ENGINE`. The default command is `python`; pass another after the
-image tag to run it (standard OCI semantics, with no fixed entrypoint).
+image tag to run it.
+
+## Activation and runtime settings
+
+Images behave like an activated environment:
+
+- **Variables are baked in.** The image sets `PATH`, `CONDA_PREFIX`, the
+  environment's identity (`NEPENTHE_ENVIRONMENT`, `NEPENTHE_PLATFORM`,
+  `NEPENTHE_VERSION`), and the manifest's [`activation`](Manifests#activation)
+  `env` as OCI `ENV` / SIF `%environment` values. They apply however the
+  container starts, including `apptainer exec` and an overridden entrypoint.
+- **Activation hooks run first.** The OCI entrypoint and the SIF runscript
+  source the prefix's `etc/conda/activate.d/*.sh` scripts (package hooks and
+  the manifest's activation `scripts`), then run the command. `apptainer exec`
+  and a replaced entrypoint skip this step.
+- **Package metadata is readable.** `conda-meta` records are made world-readable,
+  since images run as users other than the one who built them.
+
+`--activation-script off` leaves the identity and manifest variables out.
+
+Add variables with `--env KEY=VALUE` (repeatable); they win over the
+environment's own. Run an OCI image as a non-root user with `--user`; the base
+image must provide that user:
+
+```bash
+nepenthe image build app \
+  --registry file:///srv/nepenthe --python 3.11 \
+  --format oci --tag nepenthe-app:1.0.0 \
+  --env APP_MODE=batch --user app
+```
 
 ## Running against an image
 
@@ -104,9 +133,10 @@ Use `image build` when you want a named, shareable image instead.
 1. **Install.** The published lock is pulled and installed into a staging
    prefix (a cache directory by default; override with `--prefix`), using the same
    no-conda installer as [`create`](Install#create).
-1. **Generate a definition.** nepenthe writes an Apptainer definition that
-   bootstraps from `--base` and copies the environment into the image at the
-   same absolute path it occupies on the host. Keeping the path identical means
+1. **Generate a definition.** nepenthe writes an Apptainer definition (or a
+   `Containerfile`) that bootstraps from `--base`, copies the environment into
+   the image at the same absolute path it occupies on the host, and sets its
+   [runtime settings](#activation-and-runtime-settings). Keeping the path identical means
    conda's embedded prefixes, shebangs, and `RPATH`s resolve unchanged, with no
    prefix relocation.
 1. **Build.** nepenthe calls `apptainer build` to produce the SIF. Set
@@ -129,7 +159,8 @@ The image includes provenance labels (`org.nepenthe.environment`,
 ## Limitations
 
 - **Image formats.** SIF supports self-contained, `--lazy` (cache-mounted),
-  and writable-overlay modes; OCI export is self-contained only.
+  and writable-overlay modes; OCI export is self-contained only. `--user`
+  applies to OCI only; SIF images run as the invoking user.
 - **In-image env path** is the host staging path, which contains your username by
   default. Pin it with `--prefix` for a stable, shareable path.
 - **Base image and timestamps.** Package contents match the
