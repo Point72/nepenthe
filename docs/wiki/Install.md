@@ -121,7 +121,9 @@ included.
 
 `create`, `unpack`, `sync`, `run`, `shell`, and `image build` accept
 `--activation-script on|off` (default `on`). `off` skips Nepenthe's generated
-script and removes a previous Nepenthe-generated script from the prefix.
+script and removes a previous Nepenthe-generated script from the prefix. For
+`image build`, `off` also leaves the identity and manifest variables out of the
+image.
 Package-provided activation scripts are left untouched.
 Unmarked legacy files at Nepenthe's reserved script paths are preserved;
 enabling generation reports a conflict, while disabling leaves them untouched.

@@ -615,6 +615,26 @@ fn write_registry_hooks(
     prefix: &Path,
     activation_script: bool,
 ) -> Result<(), InstallError> {
+    let activation = registry_activation(registry, coords, label, lock_bytes);
+    set_activation_script(
+        prefix,
+        &coords.environment,
+        Some(version),
+        &coords.platform,
+        &activation,
+        activation_script,
+    )
+}
+
+/// The activation hooks of a registry release: the manifest embedded in
+/// `lock_bytes`, else the release's manifest sidecar. Best-effort; a release
+/// without a recoverable manifest has no hooks.
+fn registry_activation(
+    registry: &Registry,
+    coords: &Coordinates,
+    label: &Label,
+    lock_bytes: &[u8],
+) -> crate::manifest::Activation {
     let manifest_yaml = crate::embed::extract_manifest(lock_bytes)
         .ok()
         .flatten()
@@ -625,7 +645,7 @@ fn write_registry_hooks(
                 .flatten()
                 .and_then(|bytes| String::from_utf8(bytes).ok())
         });
-    let activation = manifest_yaml
+    manifest_yaml
         .and_then(|yaml| crate::manifest::Manifest::from_yaml_str(&yaml).ok())
         .and_then(|manifest| {
             let selector = crate::manifest::Selector {
@@ -637,15 +657,46 @@ fn write_registry_hooks(
                 .ok()
                 .map(|resolved| resolved.activation)
         })
-        .unwrap_or_default();
-    set_activation_script(
-        prefix,
+        .unwrap_or_default()
+}
+
+/// The variables a registry release's activation hook exports: nepenthe's
+/// identity, then the manifest's declared `activation.env`.
+pub fn registry_activation_env(
+    registry: &Registry,
+    coords: &Coordinates,
+    label: &Label,
+) -> Result<Vec<(String, String)>, InstallError> {
+    let release = registry.resolve(coords, label)?;
+    let exact_label = Label::parse(&release.version);
+    let bytes = registry.pull(coords, &exact_label)?;
+    let activation = registry_activation(registry, coords, &exact_label, &bytes);
+    Ok(activation_env(
         &coords.environment,
-        Some(version),
+        Some(&release.version),
         &coords.platform,
         &activation,
-        activation_script,
-    )
+    ))
+}
+
+/// Identity variables first, then the manifest's declared env (declared wins).
+fn activation_env(
+    environment: &str,
+    version: Option<&str>,
+    platform: &str,
+    activation: &crate::manifest::Activation,
+) -> Vec<(String, String)> {
+    let mut env: Vec<(String, String)> = vec![
+        ("NEPENTHE_ENVIRONMENT".to_string(), environment.to_string()),
+        ("NEPENTHE_PLATFORM".to_string(), platform.to_string()),
+    ];
+    if let Some(v) = version {
+        env.push(("NEPENTHE_VERSION".to_string(), v.to_string()));
+    }
+    for (k, v) in &activation.env {
+        env.push((k.clone(), v.clone()));
+    }
+    env
 }
 
 /// The name of the lock's only environment, or an error if it declares none or
@@ -745,17 +796,7 @@ pub fn write_activation_hooks(
         .map(|p| p.is_windows())
         .unwrap_or(cfg!(windows));
 
-    // Identity vars first, then the manifest's declared env (declared wins).
-    let mut env: Vec<(String, String)> = vec![
-        ("NEPENTHE_ENVIRONMENT".to_string(), environment.to_string()),
-        ("NEPENTHE_PLATFORM".to_string(), platform.to_string()),
-    ];
-    if let Some(v) = version {
-        env.push(("NEPENTHE_VERSION".to_string(), v.to_string()));
-    }
-    for (k, v) in &activation.env {
-        env.push((k.clone(), v.clone()));
-    }
+    let env = activation_env(environment, version, platform, activation);
 
     let dir = prefix.join("etc").join("conda").join("activate.d");
     std::fs::create_dir_all(&dir).map_err(InstallError::Io)?;
@@ -884,7 +925,7 @@ fn is_generated_activation_script(contents: &str) -> bool {
 
 /// Quote a value for safe use in a POSIX `export KEY=<value>` line by wrapping
 /// it in single quotes (escaping any embedded single quote as `'\''`).
-fn sh_single_quote(value: &str) -> String {
+pub(crate) fn sh_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 

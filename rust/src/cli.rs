@@ -698,8 +698,24 @@ struct ImageBuildArgs {
     #[arg(long)]
     prefix: Option<PathBuf>,
     /// Write nepenthe's environment identity activation script (on by default).
+    /// The image also exports its variables unless this is off.
     #[arg(long, default_value = "on", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::Set)]
     activation_script: bool,
+    /// Set an environment variable in the image (repeatable). Overrides the
+    /// environment's own activation variables.
+    #[arg(long = "env", id = "image_env", value_name = "KEY=VALUE", value_parser = parse_env_assignment)]
+    image_env: Vec<(String, String)>,
+    /// Run the image as this user (OCI only). The base image must provide it.
+    #[arg(long)]
+    user: Option<String>,
+}
+
+/// Parse a `KEY=VALUE` assignment.
+fn parse_env_assignment(value: &str) -> Result<(String, String), String> {
+    match value.split_once('=') {
+        Some((key, val)) if !key.is_empty() => Ok((key.to_string(), val.to_string())),
+        _ => Err(format!("expected KEY=VALUE, got `{value}`")),
+    }
 }
 
 #[derive(Subcommand)]
@@ -1573,6 +1589,9 @@ async fn image_build(args: ImageBuildArgs) -> CliResult {
     };
     let target = match args.format {
         ImageFormat::Sif => {
+            if args.user.is_some() {
+                return Err("--user is only supported for --format oci".into());
+            }
             let output = args
                 .output
                 .ok_or("`--output <file>` is required for --format sif")?;
@@ -1605,6 +1624,11 @@ async fn image_build(args: ImageBuildArgs) -> CliResult {
         &target,
         &args.label,
         args.activation_script,
+        &crate::image::ImageConfig {
+            env: args.image_env,
+            activate: true,
+            user: args.user,
+        },
     )
     .await?;
     eprintln!(
@@ -1887,6 +1911,63 @@ mod tests {
             let mut off = command.to_vec();
             off.extend(["--activation-script", "off"]);
             assert!(!setting(&off), "off should parse: {off:?}");
+        }
+    }
+
+    #[test]
+    fn cli_definition_is_consistent() {
+        use clap::CommandFactory;
+
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn image_build_parses_env_and_user() {
+        use clap::Parser;
+
+        let parsed = Cli::try_parse_from([
+            "nepenthe",
+            "image",
+            "build",
+            "app",
+            "--registry",
+            "file:///registry",
+            "--env",
+            "TEAM=research",
+            "--env",
+            "EMPTY=",
+            "--env",
+            "URL=a=b",
+            "--user",
+            "ray",
+        ])
+        .unwrap();
+        match parsed.command.unwrap() {
+            Command::Image(ImageCommand::Build(args)) => {
+                assert_eq!(
+                    args.image_env,
+                    [
+                        ("TEAM".to_string(), "research".to_string()),
+                        ("EMPTY".to_string(), String::new()),
+                        ("URL".to_string(), "a=b".to_string()),
+                    ]
+                );
+                assert_eq!(args.user.as_deref(), Some("ray"));
+            }
+            _ => panic!("unexpected command"),
+        }
+        for bad in ["NOVALUE", "=value"] {
+            assert!(Cli::try_parse_from([
+                "nepenthe",
+                "image",
+                "build",
+                "app",
+                "--registry",
+                "file:///registry",
+                "--env",
+                bad,
+            ])
+            .is_err());
         }
     }
 

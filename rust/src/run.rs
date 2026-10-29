@@ -573,6 +573,7 @@ pub async fn run_with_activation_script(
                 &platform,
                 config.version.as_deref().unwrap_or("latest"),
                 config.image_lazy,
+                &image::ImageConfig::default(),
             )?;
         }
         // Editable dirs are bound + on PYTHONPATH; a lazy image also binds the
