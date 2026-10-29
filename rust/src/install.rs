@@ -382,12 +382,34 @@ pub(crate) async fn install_lock_with_activation_script(
     link_scripts: LinkScripts,
     activation_script: bool,
 ) -> Result<InstallSummary, InstallError> {
+    install_lock_into(
+        lock,
+        environment,
+        platform,
+        prefix,
+        None,
+        link_scripts,
+        activation_script,
+    )
+    .await
+}
+
+async fn install_lock_into(
+    lock: &LockFile,
+    environment: &str,
+    platform: &str,
+    prefix: &Path,
+    target_prefix: Option<&Path>,
+    link_scripts: LinkScripts,
+    activation_script: bool,
+) -> Result<InstallSummary, InstallError> {
     let records = lock_records(lock, environment, platform)?;
-    install_records_with_activation_script(
+    install_records_into(
         records,
         environment,
         platform,
         prefix,
+        target_prefix,
         link_scripts,
         activation_script,
     )
@@ -515,6 +537,29 @@ pub(crate) async fn install_records_with_activation_script(
     link_scripts: LinkScripts,
     activation_script: bool,
 ) -> Result<InstallSummary, InstallError> {
+    install_records_into(
+        records,
+        environment,
+        platform,
+        prefix,
+        None,
+        link_scripts,
+        activation_script,
+    )
+    .await
+}
+
+/// Link `records` into `prefix`. With `target_prefix`, hardcoded paths are
+/// patched for that location instead, so the prefix can be moved there.
+async fn install_records_into(
+    records: Vec<RepoDataRecord>,
+    environment: &str,
+    platform: &str,
+    prefix: &Path,
+    target_prefix: Option<&Path>,
+    link_scripts: LinkScripts,
+    activation_script: bool,
+) -> Result<InstallSummary, InstallError> {
     let target = Platform::from_str(platform)
         .map_err(|e| InstallError::Lock(format!("bad platform '{platform}': {e}")))?;
     raise_open_file_limit();
@@ -524,11 +569,15 @@ pub(crate) async fn install_records_with_activation_script(
         ids
     };
 
-    rattler::install::Installer::new()
+    let mut installer = rattler::install::Installer::new()
         .with_download_client(crate::net::authenticated_client().map_err(InstallError::Install)?)
         .with_max_concurrent_requests(MAX_CONCURRENT_FETCHES)
         .with_target_platform(target)
-        .with_execute_link_scripts(link_scripts == LinkScripts::Run)
+        .with_execute_link_scripts(link_scripts == LinkScripts::Run);
+    if let Some(target_prefix) = target_prefix {
+        installer.set_alternative_target_prefix(target_prefix);
+    }
+    installer
         .install(prefix, records)
         .await
         .map_err(|e| InstallError::Install(error_chain(&e)))?;
@@ -581,15 +630,40 @@ pub async fn create_with_activation_script(
     link_scripts: LinkScripts,
     activation_script: bool,
 ) -> Result<InstallSummary, InstallError> {
+    create_relocated(
+        registry,
+        coords,
+        label,
+        prefix,
+        None,
+        link_scripts,
+        activation_script,
+    )
+    .await
+}
+
+/// Like [`create`], but patch hardcoded paths for `target_prefix` (when set)
+/// rather than `prefix`, so the installed tree can be moved there, e.g. into
+/// an image. `prefix` must not already hold an environment.
+pub async fn create_relocated(
+    registry: &Registry,
+    coords: &Coordinates,
+    label: &Label,
+    prefix: &Path,
+    target_prefix: Option<&Path>,
+    link_scripts: LinkScripts,
+    activation_script: bool,
+) -> Result<InstallSummary, InstallError> {
     let release = registry.resolve(coords, label)?;
     let exact_label = Label::parse(&release.version);
     let bytes = registry.pull(coords, &exact_label)?;
     let lock = parse_lock(&bytes)?;
-    let summary = install_lock_with_activation_script(
+    let summary = install_lock_into(
         &lock,
         &coords.environment,
         &coords.platform,
         prefix,
+        target_prefix,
         link_scripts,
         activation_script,
     )
@@ -1832,6 +1906,116 @@ mod tests {
         );
         // a platform not in the lock is an error, not a panic
         assert!(lock_packages(&lock, "app", "win-64").is_err());
+    }
+
+    /// Publish a lock holding one local package whose `bin/tool` embeds a prefix
+    /// placeholder, the way conda-build marks hardcoded install paths.
+    #[cfg(unix)]
+    fn placeholder_package_registry(root: &Path) -> (Registry, Coordinates) {
+        use sha2::{Digest, Sha256};
+
+        let placeholder = "/opt/placeholder_placeholder_placeholder_placeholder";
+        let content = format!("#!/bin/sh\nexec {placeholder}/bin/real \"$@\"\n");
+        let digest = |bytes: &[u8]| hex::encode(Sha256::digest(bytes));
+        let package = root.join("package");
+        std::fs::create_dir_all(package.join("info")).unwrap();
+        std::fs::create_dir_all(package.join("bin")).unwrap();
+        std::fs::write(package.join("bin/tool"), &content).unwrap();
+        std::fs::write(
+            package.join("info/index.json"),
+            r#"{"name": "tool", "version": "1.0.0", "build": "0", "build_number": 0, "subdir": "noarch", "noarch": "generic", "depends": []}"#,
+        )
+        .unwrap();
+        std::fs::write(package.join("info/files"), "bin/tool\n").unwrap();
+        std::fs::write(
+            package.join("info/paths.json"),
+            serde_json::json!({
+                "paths_version": 1,
+                "paths": [{
+                    "_path": "bin/tool",
+                    "path_type": "hardlink",
+                    "file_mode": "text",
+                    "prefix_placeholder": placeholder,
+                    "sha256": digest(content.as_bytes()),
+                    "size_in_bytes": content.len(),
+                }],
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let archive = root.join("tool-1.0.0-0.tar.bz2");
+        let status = std::process::Command::new("tar")
+            .arg("-cjf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(&package)
+            .args(["info", "bin"])
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let bytes = std::fs::read(&archive).unwrap();
+        let url = format!("file://{}", archive.display());
+        let platform = Platform::current().to_string();
+        let lock = format!(
+            "version: 6\nplatforms:\n- name: {platform}\n  virtual-packages: []\n\
+             environments:\n  tool:\n    channels: []\n    packages:\n      {platform}:\n      - conda: {url}\n\
+             packages:\n- conda: {url}\n  name: tool\n  version: 1.0.0\n  build: '0'\n  build_number: 0\n\
+             \x20 subdir: noarch\n  noarch: generic\n  sha256: {}\n  size: {}\n  depends: []\n",
+            digest(&bytes),
+            bytes.len()
+        );
+        let registry = Registry::new(
+            crate::backend::SpecStore::new(),
+            format!("file://{}", root.join("registry").display()),
+        );
+        let coords = Coordinates::new("tool", platform);
+        registry.publish(&coords, "1.0.0", lock.as_bytes()).unwrap();
+        (registry, coords)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn create_relocated_links_for_the_target_prefix() {
+        let dir = std::env::temp_dir().join(format!("nepenthe-relocate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (registry, coords) = placeholder_package_registry(&dir);
+
+        let staged = dir.join("staged");
+        let target = Path::new("/opt/nepenthe/tool");
+        create_relocated(
+            &registry,
+            &coords,
+            &Label::Latest,
+            &staged,
+            Some(target),
+            LinkScripts::Skip,
+            true,
+        )
+        .await
+        .unwrap();
+        let tool = std::fs::read_to_string(staged.join("bin/tool")).unwrap();
+        assert!(tool.contains("exec /opt/nepenthe/tool/bin/real"), "{tool}");
+        assert!(!tool.contains(&staged.display().to_string()));
+
+        // Without a target, paths are patched for the prefix itself.
+        let local = dir.join("local");
+        create(
+            &registry,
+            &coords,
+            &Label::Latest,
+            &local,
+            LinkScripts::Skip,
+        )
+        .await
+        .unwrap();
+        let tool = std::fs::read_to_string(local.join("bin/tool")).unwrap();
+        assert!(
+            tool.contains(&format!("exec {}/bin/real", local.display())),
+            "{tool}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Capstone: solve python live, export a real lock, install
