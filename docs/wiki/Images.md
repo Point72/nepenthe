@@ -128,17 +128,34 @@ supports `--lazy` images and writable layers over a read-only base:
 
 Use `image build` when you want a named, shareable image instead.
 
+## Image path
+
+The environment lives at `/opt/nepenthe/<env>` inside the image. nepenthe
+installs it into a temporary host directory, linked for that path, and removes
+the directory after the build. Choose another path with `--image-prefix`:
+
+```bash
+nepenthe image build app --registry file:///srv/nepenthe --python 3.11 \
+  --format oci --tag nepenthe-app:1.0.0 --image-prefix /opt/app
+```
+
+With `--prefix`, the environment is installed into that host directory and, unless
+`--image-prefix` is also given, uses the same path inside the image; an existing
+environment there is reused. A prefix being relinked for a different image path
+must not already hold an environment. `--lazy` images bind the host prefix at
+run time, so their image path is always the host prefix (a cache directory by
+default).
+
 ## How it works
 
-1. **Install.** The published lock is pulled and installed into a staging
-   prefix (a cache directory by default; override with `--prefix`), using the same
-   no-conda installer as [`create`](Install#create).
+1. **Install.** The published lock is pulled and installed into a host prefix
+   with the same no-conda installer as [`create`](Install#create). Hardcoded
+   paths in packages (prefixes, shebangs, `RPATH`s) are patched for the
+   environment's [path inside the image](#image-path), so the prefix is staged
+   on the host but works only at that path.
 1. **Generate a definition.** nepenthe writes an Apptainer definition (or a
-   `Containerfile`) that bootstraps from `--base`, copies the environment into
-   the image at the same absolute path it occupies on the host, and sets its
-   [runtime settings](#activation-and-runtime-settings). Keeping the path identical means
-   conda's embedded prefixes, shebangs, and `RPATH`s resolve unchanged, with no
-   prefix relocation.
+   `Containerfile`) that bootstraps from `--base`, copies the host prefix to the
+   image path, and sets its [runtime settings](#activation-and-runtime-settings).
 1. **Build.** nepenthe calls `apptainer build` to produce the SIF. Set
    `NEPENTHE_APPTAINER` to use a specific binary; otherwise it uses `apptainer`
    on `PATH`.
@@ -161,8 +178,6 @@ The image includes provenance labels (`org.nepenthe.environment`,
 - **Image formats.** SIF supports self-contained, `--lazy` (cache-mounted),
   and writable-overlay modes; OCI export is self-contained only. `--user`
   applies to OCI only; SIF images run as the invoking user.
-- **In-image env path** is the host staging path, which contains your username by
-  default. Pin it with `--prefix` for a stable, shareable path.
 - **Base image and timestamps.** Package contents match the
   lock; the base image tag and build timestamps are the remaining variables. Pin
   a digest in `--base` to fix the base image version.

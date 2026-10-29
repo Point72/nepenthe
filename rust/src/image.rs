@@ -14,9 +14,10 @@
 //! the materialized environment is copied in on top — "self-contained" means all
 //! *packages* are baked in, atop a minimal OS that supplies the loader and shell.
 //!
-//! **No prefix relocation.** The environment is copied to the *same* absolute
+//! **Image path.** By default the environment is copied to the *same* absolute
 //! path inside the image as it occupies on the host, so conda's baked prefixes,
-//! shebangs, and `RPATH`s resolve unchanged.
+//! shebangs, and `RPATH`s resolve unchanged. With [`ImageConfig::prefix`], the
+//! environment is instead linked for that image path while staged on the host.
 //!
 //! **Activated images.** An [`ImageConfig`] bakes environment variables into the
 //! image (`ENV` / `%environment`), so they hold however the container starts.
@@ -113,8 +114,10 @@ impl From<std::io::Error> for ImageError {
 pub struct ImageSummary {
     /// The artifact produced: a SIF file path, or an OCI image tag.
     pub artifact: String,
-    /// The prefix the environment was materialized into (and its in-image path).
+    /// The host prefix the environment was materialized into.
     pub prefix: PathBuf,
+    /// The environment's path inside the image.
+    pub image_prefix: PathBuf,
     /// The platform built for.
     pub platform: String,
 }
@@ -147,6 +150,9 @@ pub struct ImageConfig {
     pub activate: bool,
     /// Run an OCI image as this user (`USER`). The base must provide it.
     pub user: Option<String>,
+    /// The environment's path inside the image, when it differs from the host
+    /// prefix it is staged in.
+    pub prefix: Option<PathBuf>,
 }
 
 impl ImageConfig {
@@ -175,8 +181,29 @@ impl ImageConfig {
                 return Err(ImageError::Config(format!("invalid image user `{user}`")));
             }
         }
+        if let Some(prefix) = &self.prefix {
+            let text = prefix.to_string_lossy();
+            let unsafe_char = text.chars().any(|c| {
+                c.is_whitespace() || c.is_control() || matches!(c, '"' | '\'' | '\\' | '$')
+            });
+            if !text.starts_with('/') || unsafe_char {
+                return Err(ImageError::Config(format!(
+                    "image prefix `{text}` must be an absolute path without whitespace, quotes, `\\`, or `$`"
+                )));
+            }
+        }
         Ok(())
     }
+
+    /// The environment's path inside the image for host prefix `staged`.
+    fn image_prefix<'a>(&'a self, staged: &'a Path) -> &'a Path {
+        self.prefix.as_deref().unwrap_or(staged)
+    }
+}
+
+/// The default environment path inside an image.
+pub fn default_image_prefix(environment: &str) -> PathBuf {
+    PathBuf::from(format!("/opt/nepenthe/{environment}"))
 }
 
 /// The shell command that sources a prefix's `activate.d` hooks.
@@ -247,8 +274,8 @@ pub fn bootstrap_for(base: &str) -> (&str, &str) {
 /// Render the Apptainer definition that packages a materialized conda `prefix`
 /// into an image atop `base`.
 ///
-/// When `lazy` is false the environment is copied to the *same* absolute path
-/// inside the image (no relocation, self-contained). When `lazy` is true the
+/// When `lazy` is false the environment is copied to its image path
+/// ([`ImageConfig::prefix`], else the same path as on the host). When `lazy` is true the
 /// `%files` section is omitted — the prefix is expected to be bind-mounted at
 /// run time, yielding a tiny image that shares the host's packages.
 /// `%environment` puts the prefix on `PATH` with `CONDA_PREFIX` and `config.env`
@@ -263,12 +290,14 @@ pub fn apptainer_definition(
     lazy: bool,
     config: &ImageConfig,
 ) -> String {
-    let p = prefix.display();
+    let image_prefix = config.image_prefix(prefix);
+    let host = prefix.display();
+    let p = image_prefix.display();
     let (bootstrap, from) = bootstrap_for(base);
     let files = if lazy {
         String::new()
     } else {
-        format!("%files\n    {p} {p}\n\n")
+        format!("%files\n    {host} {p}\n\n")
     };
     let mut environment = String::new();
     for (key, value) in &config.env {
@@ -278,7 +307,7 @@ pub fn apptainer_definition(
         ));
     }
     let activate = if config.activate {
-        format!("    {}\n", activation_command(prefix))
+        format!("    {}\n", activation_command(image_prefix))
     } else {
         String::new()
     };
@@ -302,8 +331,8 @@ pub fn apptainer_definition(
 /// Render an OCI `Containerfile` (Dockerfile) that packages a materialized conda
 /// `prefix` into a self-contained image atop `base`.
 ///
-/// The build context is the prefix itself, so `COPY . <prefix>` reconstructs the
-/// environment at the *same* absolute path inside the image (no relocation).
+/// The build context is the host prefix, which `COPY` places at the image path
+/// ([`ImageConfig::prefix`], else the same path as on the host).
 /// `config.env` becomes `ENV` instructions and `config.user` the `USER`. With
 /// `config.activate`, the entrypoint sources the activation hooks before running
 /// the command. The default command is `python`; pass another to
@@ -316,7 +345,8 @@ pub fn containerfile(
     label: &str,
     config: &ImageConfig,
 ) -> String {
-    let p = prefix.display();
+    let image_prefix = config.image_prefix(prefix);
+    let p = image_prefix.display();
     let mut out = format!(
         "FROM {base}\n\
          COPY . {p}\n\
@@ -338,7 +368,7 @@ pub fn containerfile(
         let entrypoint = [
             "/bin/sh".to_string(),
             "-c".to_string(),
-            format!("{}; exec \"$@\"", activation_command(prefix)),
+            format!("{}; exec \"$@\"", activation_command(image_prefix)),
             "nepenthe".to_string(),
         ];
         out.push_str(&format!(
@@ -622,10 +652,25 @@ pub async fn build_with_activation_script(
             "a runtime user is only supported for OCI images".into(),
         ));
     }
+    let relocate_to = extra.prefix.as_deref().filter(|p| *p != prefix);
+    if relocate_to.is_some() {
+        if matches!(target, ImageTarget::Sif { lazy: true, .. }) {
+            return Err(ImageError::Config(
+                "lazy images bind the host prefix, so it must also be the image path".into(),
+            ));
+        }
+        if prefix.join("conda-meta").exists() {
+            return Err(ImageError::Config(format!(
+                "staging prefix {} already holds an environment; relocating into an image needs a fresh one",
+                prefix.display()
+            )));
+        }
+    }
     let mut config = ImageConfig {
         env: Vec::new(),
         activate: true,
         user: extra.user.clone(),
+        prefix: relocate_to.map(Path::to_path_buf),
     };
     if activation_script {
         config.env = install::registry_activation_env(registry, coords, label)?;
@@ -634,11 +679,12 @@ pub async fn build_with_activation_script(
 
     // Materialize the environment (self-contained: every package on disk).
     if !prefix.join("conda-meta").is_dir() {
-        install::create_with_activation_script(
+        install::create_relocated(
             registry,
             coords,
             label,
             prefix,
+            relocate_to,
             install::LinkScripts::Skip,
             activation_script,
         )
@@ -683,6 +729,7 @@ pub async fn build_with_activation_script(
     Ok(ImageSummary {
         artifact,
         prefix: prefix.to_path_buf(),
+        image_prefix: config.image_prefix(prefix).to_path_buf(),
         platform: coords.platform.clone(),
     })
 }
@@ -804,6 +851,7 @@ mod tests {
             ],
             activate: true,
             user: Some("ray".into()),
+            prefix: None,
         }
     }
 
@@ -888,6 +936,7 @@ mod tests {
             env: env.into_iter().map(|(k, v)| (k.into(), v.into())).collect(),
             activate: true,
             user: user.map(Into::into),
+            prefix: None,
         };
         assert!(bad(vec![("OK_1", "value with spaces")], Some("ray"))
             .validate()
@@ -984,6 +1033,7 @@ mod tests {
             env: vec![("SHARED".into(), "cli".into())],
             activate: false,
             user: Some("ray".into()),
+            prefix: None,
         };
         build_with_activation_script(
             &registry,
@@ -1056,6 +1106,110 @@ mod tests {
         // With the identity hook off, nothing beyond PATH/CONDA_PREFIX is baked in.
         assert!(!def.contains("NEPENTHE_ENVIRONMENT"));
         assert!(def.contains("activate.d/*.sh"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn relocated_recipes_copy_host_prefix_to_image_prefix() {
+        let config = ImageConfig {
+            activate: true,
+            prefix: Some(PathBuf::from("/opt/nepenthe/app")),
+            ..ImageConfig::default()
+        };
+        let host = Path::new("/cache/staging/app");
+        let def = apptainer_definition(
+            host,
+            "debian:bookworm-slim",
+            "app",
+            "linux-64",
+            "1.0.0",
+            false,
+            &config,
+        );
+        assert!(def.contains("%files\n    /cache/staging/app /opt/nepenthe/app\n"));
+        assert!(def.contains("export PATH=\"/opt/nepenthe/app/bin:$PATH\""));
+        assert!(def.contains("'/opt/nepenthe/app'/etc/conda/activate.d/*.sh"));
+
+        let cf = containerfile(
+            host,
+            "debian:bookworm-slim",
+            "app",
+            "linux-64",
+            "1.0.0",
+            &config,
+        );
+        assert!(cf.contains("COPY . /opt/nepenthe/app\n"));
+        assert!(cf.contains("ENV CONDA_PREFIX=\"/opt/nepenthe/app\""));
+        assert!(cf.contains("'/opt/nepenthe/app'/etc/conda/activate.d/*.sh"));
+        assert!(!cf.contains("/cache/staging"));
+    }
+
+    #[test]
+    fn config_rejects_unsafe_image_prefixes() {
+        let with = |prefix: &str| ImageConfig {
+            prefix: Some(PathBuf::from(prefix)),
+            ..ImageConfig::default()
+        };
+        assert!(with("/opt/nepenthe/research-anyscale").validate().is_ok());
+        for bad in [
+            "opt/env",
+            "/opt/my env",
+            "/opt/$HOME",
+            "/opt/\"x\"",
+            "/opt/a\nb",
+        ] {
+            assert!(with(bad).validate().is_err(), "{bad:?} should be rejected");
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn build_relocates_into_a_fresh_staging_prefix() {
+        let dir =
+            std::env::temp_dir().join(format!("nepenthe-image-relocate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (registry, coords) = activation_registry(&dir);
+        let staged = dir.join("staged");
+        let relocated = ImageConfig {
+            prefix: Some(PathBuf::from("/opt/nepenthe/research")),
+            ..ImageConfig::default()
+        };
+        let build = |target: ImageTarget| {
+            let (registry, coords, staged, relocated) = (&registry, &coords, &staged, &relocated);
+            async move {
+                build_with_activation_script(
+                    registry,
+                    coords,
+                    &Label::Latest,
+                    "debian:bookworm-slim",
+                    staged,
+                    &target,
+                    "latest",
+                    true,
+                    relocated,
+                )
+                .await
+            }
+        };
+
+        // Lazy images bind the host prefix, so they cannot be relocated.
+        let lazy = build(ImageTarget::Sif {
+            output: dir.join("lazy.sif"),
+            lazy: true,
+        })
+        .await;
+        assert!(matches!(lazy, Err(ImageError::Config(_))));
+        assert!(!staged.exists());
+
+        // An existing environment was linked for its own path, so it is refused.
+        std::fs::create_dir_all(staged.join("conda-meta")).unwrap();
+        let existing = build(ImageTarget::Oci {
+            tag: "research:1.2.3".into(),
+        })
+        .await;
+        assert!(matches!(existing, Err(ImageError::Config(message)) if message.contains("fresh")));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

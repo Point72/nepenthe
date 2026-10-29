@@ -262,9 +262,11 @@ Apptainer/SIF (`apptainer build`) or an OCI image (`podman`/`docker build`
 from a generated `Containerfile`, engine via `NEPENTHE_OCI_ENGINE`). The
 generated recipe bootstraps from a small glibc base (default
 `debian:bookworm-slim`), since a `scratch` root cannot run conda-forge binaries,
-which need the system loader and a `/bin/sh`, and copies the environment to the
-same absolute path it occupies on the host, so conda's embedded prefixes, shebangs,
-and `RPATH`s resolve without relocation. An `ImageConfig` carries the runtime
+which need the system loader and a `/bin/sh`, and copies the environment to
+its image path (`ImageConfig::prefix`, default `/opt/nepenthe/<env>`).
+`install::create_relocated` stages it on the host with rattler's alternative
+target prefix, so embedded prefixes, shebangs, and `RPATH`s are patched for the
+image path. An `ImageConfig` carries the runtime
 settings: variables (the release's activation env from
 `install::registry_activation_env`, then `--env`), a sourcing of the prefix's
 `activate.d` hooks in the OCI entrypoint / SIF runscript, and an OCI `USER`.

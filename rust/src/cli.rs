@@ -12,7 +12,7 @@
 //! `npb` runs `nepenthe build`, any other name runs the full CLI. See also
 //! [`run`] and [`run_build`].
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -693,10 +693,14 @@ struct ImageBuildArgs {
     /// Lazy image (SIF only): don't bake the env in; bind it at run time.
     #[arg(long)]
     lazy: bool,
-    /// Staging prefix to materialize into (defaults to a cache dir). Also the
-    /// environment's path inside the image.
+    /// Host prefix to materialize into (defaults to a temporary directory, or a
+    /// cache dir with `--lazy`).
     #[arg(long)]
     prefix: Option<PathBuf>,
+    /// The environment's path inside the image. Defaults to
+    /// `/opt/nepenthe/<env>`; with `--prefix` or `--lazy`, to the host prefix.
+    #[arg(long)]
+    image_prefix: Option<PathBuf>,
     /// Write nepenthe's environment identity activation script (on by default).
     /// The image also exports its variables unless this is off.
     #[arg(long, default_value = "on", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::Set)]
@@ -1583,9 +1587,18 @@ async fn image_build(args: ImageBuildArgs) -> CliResult {
     let registry = args.coords.build_registry();
     let coords = args.coords.coordinates();
     let label = Label::parse(&args.label);
-    let prefix = match args.prefix {
-        Some(p) => p,
-        None => cache_env_prefix(&coords)?,
+    let mut staging = None;
+    let (prefix, image_prefix) = match (args.prefix, args.image_prefix) {
+        (Some(prefix), image_prefix) => (prefix, image_prefix),
+        (None, None) if args.lazy => (cache_env_prefix(&coords)?, None),
+        (None, image_prefix) => {
+            let dir = StagingDir::new(&coords)?;
+            let prefix = dir.0.clone();
+            staging = Some(dir);
+            let image_prefix = image_prefix
+                .unwrap_or_else(|| crate::image::default_image_prefix(&coords.environment));
+            (prefix, Some(image_prefix))
+        }
     };
     let target = match args.format {
         ImageFormat::Sif => {
@@ -1628,14 +1641,51 @@ async fn image_build(args: ImageBuildArgs) -> CliResult {
             env: args.image_env,
             activate: true,
             user: args.user,
+            prefix: image_prefix,
         },
     )
     .await?;
+    drop(staging);
     eprintln!(
-        "built image for {} ({}) → {}",
-        coords.environment, summary.platform, summary.artifact
+        "built image for {} ({}) at {} → {}",
+        coords.environment,
+        summary.platform,
+        summary.image_prefix.display(),
+        summary.artifact
     );
     Ok(())
+}
+
+/// A fresh host prefix for one image build, removed afterwards.
+struct StagingDir(PathBuf);
+
+impl StagingDir {
+    fn new(coords: &Coordinates) -> Result<Self, Box<dyn std::error::Error>> {
+        let cached = cache_env_prefix(coords)?;
+        let name = cached
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| coords.environment.clone());
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        let root = cached
+            .parent()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf)
+            .unwrap_or_else(std::env::temp_dir)
+            .join("nepenthe-image");
+        Ok(Self(
+            root.join(format!("{name}-{}-{nonce}", std::process::id())),
+        ))
+    }
+}
+
+impl Drop for StagingDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 fn list(args: ListArgs) -> CliResult {
@@ -1940,6 +1990,8 @@ mod tests {
             "URL=a=b",
             "--user",
             "ray",
+            "--image-prefix",
+            "/opt/app",
         ])
         .unwrap();
         match parsed.command.unwrap() {
@@ -1953,6 +2005,7 @@ mod tests {
                     ]
                 );
                 assert_eq!(args.user.as_deref(), Some("ray"));
+                assert_eq!(args.image_prefix.as_deref(), Some(Path::new("/opt/app")));
             }
             _ => panic!("unexpected command"),
         }
