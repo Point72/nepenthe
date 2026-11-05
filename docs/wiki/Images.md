@@ -105,13 +105,15 @@ Images behave like an activated environment:
 
 Add variables with `--env KEY=VALUE` (repeatable); they win over the
 environment's own. Run an OCI image as a non-root user with `--user`; the base
-image must provide that user:
+image must provide that user. The user also owns the environment, so it can
+modify it at run time (for example `pip install`). Pass `user:group` to set the
+group too; with a bare user, the engine picks the group:
 
 ```bash
 nepenthe image build app \
   --registry file:///srv/nepenthe --python 3.11 \
   --format oci --tag nepenthe-app:1.0.0 \
-  --env APP_MODE=batch --user app
+  --env APP_MODE=batch --user app:app
 ```
 
 ## Running against an image

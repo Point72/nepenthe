@@ -269,7 +269,8 @@ target prefix, so embedded prefixes, shebangs, and `RPATH`s are patched for the
 image path. An `ImageConfig` carries the runtime
 settings: variables (the release's activation env from
 `install::registry_activation_env`, then `--env`), a sourcing of the prefix's
-`activate.d` hooks in the OCI entrypoint / SIF runscript, and an OCI `USER`.
+`activate.d` hooks in the OCI entrypoint / SIF runscript, and an OCI `USER` that
+also owns the copied environment (`COPY --chown`).
 `apptainer_definition` and `containerfile` are pure, unit-tested functions. `nepenthe run --image` reuses
 `package_sif` + `exec_in_image` to run inside a content-keyed SIF of the run
 prefix (overlays included, editable directories bind-mounted).

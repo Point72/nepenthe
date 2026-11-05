@@ -148,7 +148,8 @@ pub struct ImageConfig {
     /// Source the prefix's `etc/conda/activate.d` hooks before the command (the
     /// OCI entrypoint and the SIF runscript).
     pub activate: bool,
-    /// Run an OCI image as this user (`USER`). The base must provide it.
+    /// Run an OCI image as this user (`USER`), who also owns the environment.
+    /// The base must provide it.
     pub user: Option<String>,
     /// The environment's path inside the image, when it differs from the host
     /// prefix it is staged in.
@@ -333,7 +334,8 @@ pub fn apptainer_definition(
 ///
 /// The build context is the host prefix, which `COPY` places at the image path
 /// ([`ImageConfig::prefix`], else the same path as on the host).
-/// `config.env` becomes `ENV` instructions and `config.user` the `USER`. With
+/// `config.env` becomes `ENV` instructions and `config.user` the `USER`, who also
+/// owns the copied environment. With
 /// `config.activate`, the entrypoint sources the activation hooks before running
 /// the command. The default command is `python`; pass another to
 /// `docker`/`podman run` to override.
@@ -347,9 +349,16 @@ pub fn containerfile(
 ) -> String {
     let image_prefix = config.image_prefix(prefix);
     let p = image_prefix.display();
+    // The runtime user owns the environment so it can modify it in place (e.g.
+    // `pip install`, or a platform replacing its `pip`).
+    let chown = config
+        .user
+        .as_ref()
+        .map(|user| format!("--chown={user} "))
+        .unwrap_or_default();
     let mut out = format!(
         "FROM {base}\n\
-         COPY . {p}\n\
+         COPY {chown}. {p}\n\
          ENV PATH=\"{p}/bin:$PATH\"\n\
          ENV CONDA_PREFIX=\"{p}\"\n",
     );
@@ -838,9 +847,10 @@ mod tests {
         assert!(cf.contains("ENV CONDA_PREFIX=\"/cache/nepenthe-env/app-linux-64-py3.11\""));
         assert!(cf.contains("LABEL org.nepenthe.environment=\"app\""));
         assert!(cf.contains("CMD [\"python\"]"));
-        // Without configuration there is no entrypoint or user.
+        // Without configuration there is no entrypoint or user, and root owns the copy.
         assert!(!cf.contains("ENTRYPOINT"));
         assert!(!cf.contains("USER"));
+        assert!(!cf.contains("--chown"));
     }
 
     fn activated() -> ImageConfig {
@@ -869,6 +879,8 @@ mod tests {
         // Quotes, `$`, and backslashes are escaped so the value is literal.
         assert!(cf.contains(r#"ENV TEAM_NOTE="it's \"\$HOME\" \\ done""#));
         assert!(cf.contains("USER ray\n"));
+        // The runtime user owns the environment.
+        assert!(cf.contains("COPY --chown=ray . /opt/app env\n"));
         let entrypoint = cf
             .lines()
             .find_map(|line| line.strip_prefix("ENTRYPOINT "))
@@ -1064,6 +1076,7 @@ mod tests {
             ]
         );
         assert!(cf.contains("USER ray\n"));
+        assert!(cf.contains("COPY --chown=ray . "));
         assert!(cf.contains("ENTRYPOINT [\"/bin/sh\""));
         let meta = std::fs::read_dir(prefix.join("conda-meta")).unwrap();
         for entry in meta {
