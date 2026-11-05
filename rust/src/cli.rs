@@ -709,7 +709,8 @@ struct ImageBuildArgs {
     /// environment's own activation variables.
     #[arg(long = "env", id = "image_env", value_name = "KEY=VALUE", value_parser = parse_env_assignment)]
     image_env: Vec<(String, String)>,
-    /// Run the image as this user (OCI only). The base image must provide it.
+    /// Run the image as this user (OCI only), who also owns the environment. Use
+    /// `user:group` to set the group. The base image must provide it.
     #[arg(long)]
     user: Option<String>,
 }
